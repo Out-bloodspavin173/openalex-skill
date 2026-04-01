@@ -182,7 +182,7 @@ export class OpenAlexClient {
     const response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        "User-Agent": "openalex-skill/0.1.0",
+        "User-Agent": "openalex-skill/0.1.1",
       },
     });
 

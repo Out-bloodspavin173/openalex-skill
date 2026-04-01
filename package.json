@@ -1,6 +1,6 @@
 {
   "name": "openalex-skill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Human-friendly and agent-friendly CLI for the OpenAlex API.",
   "type": "module",
   "main": "dist/index.js",

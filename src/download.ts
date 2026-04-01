@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { OpenAlexClient } from "./openalex.js";
 
-const DOWNLOAD_USER_AGENT = "openalex-skill/0.1.0";
+const DOWNLOAD_USER_AGENT = "openalex-skill/0.1.1";
 
 export interface DownloadWorkOptions {
   output?: string;
