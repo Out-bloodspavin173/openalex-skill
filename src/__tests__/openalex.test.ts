@@ -562,6 +562,14 @@ describe("config", () => {
       mailto: "stored@example.com",
     });
   });
+
+  it("throws a readable error when the persistent config file is malformed", () => {
+    fs.mkdirSync(path.dirname(getConfigPath()), { recursive: true });
+    fs.writeFileSync(getConfigPath(), "{bad json", "utf8");
+
+    expect(() => getConfig()).toThrow(/Failed to read OpenAlex config/);
+    expect(() => getConfig()).toThrow(/Fix or remove the file and try again/);
+  });
 });
 
 describe("CLI integration", () => {
@@ -691,6 +699,8 @@ describe("CLI integration", () => {
     stdoutSpy.mockClear();
     await buildCli().parseAsync(["config", "path"], { from: "user" });
     expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain(path.join(".openalex-skill", "config.json"));
+
+    await expect(buildCli().parseAsync(["config"], { from: "user" })).rejects.toThrow(/Failed to read OpenAlex config/);
 
     fs.rmSync(tempHome, { recursive: true, force: true });
     if (originalHome === undefined) {

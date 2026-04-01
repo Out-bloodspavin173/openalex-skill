@@ -44,7 +44,15 @@ export function readStoredConfig(): StoredCliConfig {
     return {};
   }
 
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error(
+      `Failed to read OpenAlex config at ${configPath}: invalid JSON. Fix or remove the file and try again.`,
+    );
+  }
+
   return {
     apiKey: typeof parsed.apiKey === "string" && parsed.apiKey ? parsed.apiKey : undefined,
     baseUrl: typeof parsed.baseUrl === "string" && parsed.baseUrl ? parsed.baseUrl : undefined,
