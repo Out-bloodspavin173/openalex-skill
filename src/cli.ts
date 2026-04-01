@@ -22,7 +22,7 @@ import {
 import { createDownloadProgressReporter, downloadWorkFile } from "./download.js";
 import { EntitySpec, listEntities } from "./entities.js";
 import { getFieldCatalog } from "./field-catalog.js";
-import { OpenAlexClient } from "./openalex.js";
+import { ApiEnvelope, OpenAlexClient } from "./openalex.js";
 import { renderEnvelope, resolveOutputFormat } from "./render.js";
 
 export function buildCli(): Command {
@@ -175,8 +175,18 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         .argument("<query>", `Search query for ${spec.name}`)
         .description(`Search ${spec.name}.`)
         .action(async function (query: string, options: CommonListOptions) {
+          const listOptions = parseListOptions(options);
+          const exactLookupId = resolveExactLookupIdentifier(spec.name, query);
+          if (exactLookupId) {
+            const exactMatch = await tryExactLookup(getClient(), spec.name, exactLookupId, listOptions.select);
+            if (exactMatch) {
+              writeOutput(readGlobalOptions(this), entityHeading(spec, `search: ${query}`), wrapSingleRecordAsList(exactMatch), spec.name);
+              return;
+            }
+          }
+
           const payload = await getClient().list(spec.name, {
-            ...parseListOptions(options),
+            ...listOptions,
             search: query,
           });
           writeOutput(readGlobalOptions(this), entityHeading(spec, `search: ${query}`), payload, spec.name);
@@ -327,6 +337,116 @@ function writeOutput(options: GlobalOptions, title: string, payload: unknown, en
 
 function readGlobalOptions(command: Command): GlobalOptions {
   return command.optsWithGlobals<GlobalOptions>();
+}
+
+function wrapSingleRecordAsList(payload: ApiEnvelope<Record<string, unknown>>): ApiEnvelope<Record<string, unknown>> {
+  return {
+    rateLimit: payload.rateLimit,
+    requestUrl: payload.requestUrl,
+    meta: { count: 1, page: 1, per_page: 1 },
+    results: payload.data ? [payload.data] : [],
+  };
+}
+
+async function tryExactLookup(
+  client: OpenAlexClient,
+  entity: EntitySpec["name"],
+  identifier: string,
+  select?: string[],
+): Promise<ApiEnvelope<Record<string, unknown>> | undefined> {
+  try {
+    return await client.get(entity, identifier, select);
+  } catch (error) {
+    if (error instanceof Error && /\b404\b/.test(error.message)) {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
+function resolveExactLookupIdentifier(entity: EntitySpec["name"], query: string): string | undefined {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const openAlexPrefix = getEntityIdPrefix(entity);
+  const openAlexMatch = trimmed.match(/^https?:\/\/openalex\.org\/([A-Z]\d+)\/?$/i) ?? trimmed.match(/^([A-Z]\d+)$/i);
+  if (openAlexMatch) {
+    const shortId = openAlexMatch[1].toUpperCase();
+    return shortId.startsWith(openAlexPrefix) ? shortId : undefined;
+  }
+
+  if (entity === "works") {
+    const doi = normalizeDoiIdentifier(trimmed);
+    if (doi) {
+      return doi;
+    }
+  }
+
+  if (entity === "authors") {
+    const orcid = normalizeOrcidIdentifier(trimmed);
+    if (orcid) {
+      return orcid;
+    }
+  }
+
+  return undefined;
+}
+
+function getEntityIdPrefix(entity: EntitySpec["name"]): string {
+  switch (entity) {
+    case "works":
+      return "W";
+    case "authors":
+      return "A";
+    case "sources":
+      return "S";
+    case "institutions":
+      return "I";
+    case "topics":
+      return "T";
+    case "publishers":
+      return "P";
+    case "funders":
+      return "F";
+    case "concepts":
+      return "C";
+  }
+}
+
+function normalizeDoiIdentifier(query: string): string | undefined {
+  const bareDoiMatch = query.match(/^10\.\d{4,9}\/\S+$/i);
+  if (bareDoiMatch) {
+    return `https://doi.org/${bareDoiMatch[0]}`;
+  }
+
+  const doiUrlMatch = query.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,9}\/\S+)$/i);
+  if (doiUrlMatch) {
+    return `https://doi.org/${doiUrlMatch[1]}`;
+  }
+
+  const doiPrefixedMatch = query.match(/^doi:\s*(10\.\d{4,9}\/\S+)$/i);
+  if (doiPrefixedMatch) {
+    return `https://doi.org/${doiPrefixedMatch[1]}`;
+  }
+
+  return undefined;
+}
+
+function normalizeOrcidIdentifier(query: string): string | undefined {
+  const bareOrcidMatch = query.match(/^(\d{4}-\d{4}-\d{4}-[\dX]{4})$/i);
+  if (bareOrcidMatch) {
+    return `https://orcid.org/${bareOrcidMatch[1].toUpperCase()}`;
+  }
+
+  const orcidUrlMatch = query.match(/^https?:\/\/orcid\.org\/(\d{4}-\d{4}-\d{4}-[\dX]{4})\/?$/i);
+  if (orcidUrlMatch) {
+    return `https://orcid.org/${orcidUrlMatch[1].toUpperCase()}`;
+  }
+
+  return undefined;
 }
 
 function writeFieldCatalog(

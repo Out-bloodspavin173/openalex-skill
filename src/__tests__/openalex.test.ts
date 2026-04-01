@@ -697,6 +697,64 @@ describe("CLI integration", () => {
     expect(String(firstCall)).not.toContain('"results"');
   });
 
+  it("treats exact work identifiers on search as a direct lookup", async () => {
+    process.env.OPENALEX_API_KEY = "test-key";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        id: "https://openalex.org/W7140161630",
+        display_name: "SkillProbe",
+        cited_by_count: 0,
+      }),
+    });
+
+    const cli = buildCli();
+    await cli.parseAsync(["works", "search", "W7140161630"], { from: "user" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [URL];
+    expect(url.pathname).toBe("/works/W7140161630");
+
+    const firstCall = String(stdoutSpy.mock.calls[0]?.[0]);
+    expect(firstCall).toContain("Works search: W7140161630");
+    expect(firstCall).toContain("count=1  page=1  per_page=1");
+    expect(firstCall).toContain("SkillProbe");
+  });
+
+  it("falls back to full-text search when an exact-looking identifier does not resolve", async () => {
+    process.env.OPENALEX_API_KEY = "test-key";
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "missing",
+        headers: new Headers(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          meta: { count: 1, page: 1, per_page: 25 },
+          results: [{ id: "https://openalex.org/W1", display_name: "Fallback Search Result" }],
+        }),
+      });
+
+    const cli = buildCli();
+    await cli.parseAsync(["works", "search", "W000"], { from: "user" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [lookupUrl] = fetchMock.mock.calls[0] as [URL];
+    const [searchUrl] = fetchMock.mock.calls[1] as [URL];
+    expect(lookupUrl.pathname).toBe("/works/W000");
+    expect(searchUrl.pathname).toBe("/works");
+    expect(searchUrl.searchParams.get("search")).toBe("W000");
+
+    const firstCall = String(stdoutSpy.mock.calls[0]?.[0]);
+    expect(firstCall).toContain("Fallback Search Result");
+  });
+
   it("lists curated field paths without making an API request", async () => {
     const cli = buildCli();
     await cli.parseAsync(["works", "fields"], { from: "user" });
