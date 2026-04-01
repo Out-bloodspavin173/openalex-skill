@@ -297,6 +297,167 @@ describe("downloadWorkFile", () => {
 
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it("derives an arXiv PDF URL from a DOI landing page candidate", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+    const progress: string[] = [];
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W7140161630",
+          display_name: "SkillProbe",
+          open_access: { oa_url: "https://doi.org/10.48550/arxiv.2603.21019" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://arxiv.org/abs/2603.21019",
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        arrayBuffer: async () => textToArrayBuffer("<html></html>"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://arxiv.org/pdf/2603.21019.pdf",
+        headers: new Headers({
+          "content-type": "application/pdf",
+          "content-length": "8",
+        }),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("pdf-data"));
+            controller.close();
+          },
+        }),
+        arrayBuffer: async () => textToArrayBuffer("pdf-data"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    const result = await downloadWorkFile(client, "W7140161630", {
+      output: path.join(tempDir, "skillprobe.pdf"),
+      onProgress: (message) => progress.push(message),
+    });
+
+    expect(result.sourceField).toBe("open_access.oa_url (derived arXiv pdf)");
+    expect(result.finalUrl).toBe("https://arxiv.org/pdf/2603.21019.pdf");
+    expect(fs.readFileSync(result.filePath, "utf8")).toBe("pdf-data");
+    expect(progress.some((message) => message.includes("Trying candidate 2/2"))).toBe(true);
+    expect(progress.some((message) => message.includes("Download progress:"))).toBe(true);
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("derives an arXiv PDF URL for legacy slash-style arXiv identifiers", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W125",
+          display_name: "Legacy arXiv paper",
+          open_access: { oa_url: "https://arxiv.org/abs/hep-th/9901001" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://arxiv.org/abs/hep-th/9901001",
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        arrayBuffer: async () => textToArrayBuffer("<html></html>"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://arxiv.org/pdf/hep-th/9901001.pdf",
+        headers: new Headers({ "content-type": "application/pdf" }),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("legacy-pdf"));
+            controller.close();
+          },
+        }),
+        arrayBuffer: async () => textToArrayBuffer("legacy-pdf"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    const result = await downloadWorkFile(client, "W125", {
+      output: path.join(tempDir, "legacy.pdf"),
+    });
+
+    expect(result.sourceField).toBe("open_access.oa_url (derived arXiv pdf)");
+    expect(result.finalUrl).toBe("https://arxiv.org/pdf/hep-th/9901001.pdf");
+    expect(fs.readFileSync(result.filePath, "utf8")).toBe("legacy-pdf");
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("emits a single 100 percent progress update", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+    const progress: string[] = [];
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W126",
+          display_name: "Progress paper",
+          primary_location: { pdf_url: "https://example.org/one-chunk.pdf" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://example.org/one-chunk.pdf",
+        headers: new Headers({
+          "content-type": "application/pdf",
+          "content-length": "8",
+        }),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("pdf-data"));
+            controller.close();
+          },
+        }),
+        arrayBuffer: async () => textToArrayBuffer("pdf-data"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    await downloadWorkFile(client, "W126", {
+      output: path.join(tempDir, "progress.pdf"),
+      onProgress: (message) => progress.push(message),
+    });
+
+    expect(progress.filter((message) => message.includes("Download progress: 100%")).length).toBe(1);
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
 });
 
 describe("config", () => {
@@ -406,16 +567,19 @@ describe("config", () => {
 describe("CLI integration", () => {
   const fetchMock = vi.fn();
   const stdoutSpy = vi.spyOn(process.stdout, "write");
+  const stderrSpy = vi.spyOn(process.stderr, "write");
 
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     stdoutSpy.mockImplementation(() => true);
+    stderrSpy.mockImplementation(() => true);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     fetchMock.mockReset();
     stdoutSpy.mockReset();
+    stderrSpy.mockReset();
     delete process.env.OPENALEX_API_KEY;
   });
 
@@ -574,9 +738,12 @@ describe("CLI integration", () => {
     await cli.parseAsync(["works", "download", "W999", "--output", outputPath], { from: "user" });
 
     const firstCall = String(stdoutSpy.mock.calls[0]?.[0]);
+    const stderrOutput = stderrSpy.mock.calls.map((call) => String(call[0])).join("");
     expect(firstCall).toContain("Downloaded work full text: W999");
     expect(firstCall).toContain(`saved: ${outputPath}`);
     expect(firstCall).toContain("source: primary_location.pdf_url");
+    expect(stderrOutput).toContain("Resolving work metadata: W999");
+    expect(stderrOutput).toContain("Trying candidate 1/1: primary_location.pdf_url");
     expect(fs.readFileSync(outputPath, "utf8")).toBe("cli-pdf");
 
     fs.rmSync(tempDir, { recursive: true, force: true });

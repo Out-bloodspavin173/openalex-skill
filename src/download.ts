@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import process from "node:process";
 import path from "node:path";
 
 import { OpenAlexClient } from "./openalex.js";
@@ -8,6 +9,7 @@ const DOWNLOAD_USER_AGENT = "openalex-skill/0.1.2";
 export interface DownloadWorkOptions {
   output?: string;
   overwrite?: boolean;
+  onProgress?: (message: string) => void;
 }
 
 export interface DownloadWorkResult {
@@ -36,6 +38,7 @@ export async function downloadWorkFile(
   workId: string,
   options: DownloadWorkOptions = {},
 ): Promise<DownloadWorkResult> {
+  reportProgress(options.onProgress, `Resolving work metadata: ${workId}`);
   const work = (await client.get("works", workId)).data;
   if (!work) {
     throw new Error(`OpenAlex returned no work payload for: ${workId}`);
@@ -46,8 +49,11 @@ export async function downloadWorkFile(
     throw new Error(buildNoCandidateMessage(workId, work));
   }
 
+  reportProgress(options.onProgress, `Found ${candidates.length} download candidate(s).`);
   const failures: DownloadAttemptFailure[] = [];
-  for (const candidate of candidates) {
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    reportProgress(options.onProgress, `Trying candidate ${index + 1}/${candidates.length}: ${candidate.field}`);
     try {
       return await tryDownloadCandidate(work, candidate, options);
     } catch (error) {
@@ -77,6 +83,18 @@ function collectDownloadCandidates(work: Record<string, unknown>): DownloadCandi
 
     seen.add(url);
     candidates.push({ field, url });
+
+    for (const derived of deriveDirectFileUrls(url)) {
+      if (seen.has(derived.url)) {
+        continue;
+      }
+
+      seen.add(derived.url);
+      candidates.push({
+        field: `${field} (${derived.label})`,
+        url: derived.url,
+      });
+    }
   };
 
   pushCandidate("primary_location.pdf_url", readNestedString(work, ["primary_location", "pdf_url"]));
@@ -132,7 +150,8 @@ async function tryDownloadCandidate(
     throw new Error(`response was not a direct PDF/XML file (content-type: ${contentType ?? "unknown"})`);
   }
 
-  const bytes = Buffer.from(await response.arrayBuffer());
+  reportProgress(options.onProgress, buildDownloadStartMessage(candidate.field, finalUrl, response.headers.get("content-length")));
+  const bytes = await readResponseBytes(response, options.onProgress);
   if (bytes.length === 0) {
     throw new Error("response body was empty");
   }
@@ -145,6 +164,7 @@ async function tryDownloadCandidate(
   }
 
   await fs.writeFile(filePath, bytes);
+  reportProgress(options.onProgress, `Saved ${formatBytes(bytes.length)} to ${filePath}`);
 
   return {
     workId: readWorkId(work),
@@ -156,6 +176,137 @@ async function tryDownloadCandidate(
     contentType,
     bytes: bytes.length,
   };
+}
+
+interface DerivedUrl {
+  label: string;
+  url: string;
+}
+
+function deriveDirectFileUrls(rawUrl: string): DerivedUrl[] {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return [];
+  }
+
+  const arxivId = readArxivIdFromUrl(parsedUrl);
+  if (!arxivId) {
+    return [];
+  }
+
+  return [{
+    label: "derived arXiv pdf",
+    url: `https://arxiv.org/pdf/${arxivId}.pdf`,
+  }];
+}
+
+function readArxivIdFromUrl(url: URL): string | undefined {
+  if (/^doi\.org$/i.test(url.hostname)) {
+    const doiMatch = url.pathname.match(/^\/10\.48550\/arxiv\/(.+)$/i) ?? url.pathname.match(/^\/10\.48550\/arxiv\.([^?#]+)$/i);
+    if (doiMatch?.[1]) {
+      return doiMatch[1].replace(/\.pdf$/i, "");
+    }
+  }
+
+  if (/^arxiv\.org$/i.test(url.hostname)) {
+    const absMatch = url.pathname.match(/^\/abs\/(.+)$/i);
+    if (absMatch?.[1]) {
+      return absMatch[1].replace(/\.pdf$/i, "");
+    }
+
+    const pdfMatch = url.pathname.match(/^\/pdf\/(.+?)(?:\.pdf)?$/i);
+    if (pdfMatch?.[1]) {
+      return pdfMatch[1];
+    }
+  }
+
+  return undefined;
+}
+
+async function readResponseBytes(response: Response, onProgress: DownloadWorkOptions["onProgress"]): Promise<Buffer> {
+  const contentLength = parseOptionalInt(response.headers.get("content-length"));
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  const chunks: Buffer[] = [];
+  let totalRead = 0;
+  let nextPercentThreshold = 10;
+  let nextByteThreshold = 1024 * 1024;
+  let emittedCompleteProgress = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const chunk = Buffer.from(value);
+    chunks.push(chunk);
+    totalRead += chunk.length;
+
+    if (contentLength && contentLength > 0) {
+      const percent = Math.floor((totalRead / contentLength) * 100);
+      if (percent >= nextPercentThreshold) {
+        const clampedPercent = Math.min(percent, 100);
+        reportProgress(onProgress, `Download progress: ${clampedPercent}% (${formatBytes(totalRead)} / ${formatBytes(contentLength)})`);
+        if (clampedPercent === 100) {
+          emittedCompleteProgress = true;
+        }
+        nextPercentThreshold += 10;
+      }
+      continue;
+    }
+
+    if (totalRead >= nextByteThreshold) {
+      reportProgress(onProgress, `Download progress: ${formatBytes(totalRead)} received`);
+      nextByteThreshold += 1024 * 1024;
+    }
+  }
+
+  if (contentLength && totalRead > 0 && !emittedCompleteProgress) {
+    reportProgress(onProgress, `Download progress: 100% (${formatBytes(totalRead)} / ${formatBytes(contentLength)})`);
+  }
+
+  return Buffer.concat(chunks);
+}
+
+function buildDownloadStartMessage(field: string, finalUrl: string, contentLength: string | null): string {
+  const size = parseOptionalInt(contentLength);
+  const renderedSize = size && size > 0 ? formatBytes(size) : "unknown size";
+  return `Downloading from ${field}: ${finalUrl} (${renderedSize})`;
+}
+
+function reportProgress(onProgress: DownloadWorkOptions["onProgress"], message: string): void {
+  onProgress?.(message);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function parseOptionalInt(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function resolveOutputPath(work: Record<string, unknown>, extension: string, explicitOutput: string | undefined): string {
@@ -281,4 +432,10 @@ function readNestedString(value: Record<string, unknown>, pathSegments: string[]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+export function createDownloadProgressReporter(stream: NodeJS.WriteStream = process.stderr): (message: string) => void {
+  return (message: string) => {
+    stream.write(`${message}\n`);
+  };
 }

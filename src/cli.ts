@@ -18,7 +18,7 @@ import {
   parseListOptions,
   supportsXpac,
 } from "./command-helpers.js";
-import { downloadWorkFile } from "./download.js";
+import { createDownloadProgressReporter, downloadWorkFile } from "./download.js";
 import { EntitySpec, listEntities } from "./entities.js";
 import { getFieldCatalog } from "./field-catalog.js";
 import { OpenAlexClient } from "./openalex.js";
@@ -236,6 +236,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         const result = await downloadWorkFile(getClient(), id, {
           output: options.output,
           overwrite: options.overwrite,
+          onProgress: createDownloadProgressReporter(),
         });
 
         const lines = [
