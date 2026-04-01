@@ -42,6 +42,29 @@ export interface ListOptions {
 export class OpenAlexClient {
   public constructor(private readonly config: CliConfig) {}
 
+  public authorizeDownloadUrl(rawUrl: string): string {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return rawUrl;
+    }
+
+    if (!/^content\.openalex\.org$/i.test(url.hostname)) {
+      return rawUrl;
+    }
+
+    if (this.config.apiKey && !url.searchParams.has("api_key")) {
+      url.searchParams.set("api_key", this.config.apiKey);
+    }
+
+    if (this.config.mailto && !url.searchParams.has("mailto")) {
+      url.searchParams.set("mailto", this.config.mailto);
+    }
+
+    return url.toString();
+  }
+
   public async getRateLimit(): Promise<ApiEnvelope<Record<string, unknown>>> {
     return this.request<Record<string, unknown>>("/rate-limit", this.createQuery({}), false);
   }

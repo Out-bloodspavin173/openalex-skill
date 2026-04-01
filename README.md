@@ -17,7 +17,7 @@ Install the `openalex` skill from this repository:
 npx skills add shiquda/openalex-skill --skill openalex
 ```
 
-Then you can ask your agent to finish the setup steps according to the guide inside the skill, including CLI installation and API key configuration, or you can run those steps yourself with the instructions below.
+This installs the skill instructions, not the CLI binary itself. You still need the `openalex` command available, either by installing the npm package below or by letting your agent finish the setup steps in the skill guide.
 
 ### For local shell or plain CLI use
 
@@ -84,6 +84,8 @@ openalex works cited-by https://doi.org/10.1038/nature12373 --per-page 5
 openalex works references W2741809807 --per-page 5
 openalex works related W2741809807 --per-page 5
 ```
+
+`cited-by`, `references`, and `related` accept either a DOI or an OpenAlex work ID.
 
 Find authors and their works:
 
@@ -158,8 +160,17 @@ Important `--select` caveats:
 
 Example:
 
+Bash:
+
 ```bash
 export OPENALEX_API_KEY=your_key_here
+openalex works search "graph neural networks" --per-page 5
+```
+
+PowerShell:
+
+```powershell
+$env:OPENALEX_API_KEY="your_key_here"
 openalex works search "graph neural networks" --per-page 5
 ```
 

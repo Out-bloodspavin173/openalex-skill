@@ -11,6 +11,7 @@ import {
 } from "./config.js";
 import {
   addConfiguredListOptions,
+  addInheritedGlobalOptionHelp,
   CommonListOptions,
   createProgram,
   entityHeading,
@@ -128,14 +129,16 @@ function writeConfigSummary(): void {
 function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): Command {
   const entity = new Command(spec.name).description(spec.description);
 
-  entity
-    .command("fields")
-    .description(`List curated field paths for ${spec.name} output projection.`)
-    .action(async function () {
-      writeFieldCatalog(readGlobalOptions(this), entityHeading(spec, "fields"), getFieldCatalog(spec.name));
-    });
+  addInheritedGlobalOptionHelp(
+    entity
+      .command("fields")
+      .description(`List curated field paths for ${spec.name} output projection.`)
+      .action(async function () {
+        writeFieldCatalog(readGlobalOptions(this), entityHeading(spec, "fields"), getFieldCatalog(spec.name));
+      }),
+  );
 
-  addConfiguredListOptions(
+  addInheritedGlobalOptionHelp(addConfiguredListOptions(
     entity
       .command("list")
       .description(`List ${spec.name} with filters, search, paging, and field selection.`)
@@ -146,24 +149,27 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
     {
       allowSelect: true,
       allowIncludeXpac: supportsXpac(spec.name),
+      allowSearch: true,
     },
+  ));
+
+  addInheritedGlobalOptionHelp(
+    entity
+      .command("get")
+      .argument("<id>", `OpenAlex ${spec.singular} id or supported external id`)
+      .option("--select <field>", "repeatable selected field", (value: string, previous: string[]) => {
+        previous.push(value);
+        return previous;
+      }, [])
+      .description(`Get a single ${spec.singular}.`)
+      .action(async function (id: string, options: GlobalOptions & { select?: string[] }) {
+        const payload = await getClient().get(spec.name, id, options.select);
+        writeOutput(readGlobalOptions(this), entityHeading(spec, `get ${id}`), payload, spec.name);
+      }),
   );
 
-  entity
-    .command("get")
-    .argument("<id>", `OpenAlex ${spec.singular} id or supported external id`)
-    .option("--select <field>", "repeatable selected field", (value: string, previous: string[]) => {
-      previous.push(value);
-      return previous;
-    }, [])
-    .description(`Get a single ${spec.singular}.`)
-    .action(async function (id: string, options: GlobalOptions & { select?: string[] }) {
-      const payload = await getClient().get(spec.name, id, options.select);
-      writeOutput(readGlobalOptions(this), entityHeading(spec, `get ${id}`), payload, spec.name);
-    });
-
   if (spec.supportsSearch) {
-    addConfiguredListOptions(
+    addInheritedGlobalOptionHelp(addConfiguredListOptions(
       entity
         .command("search")
         .argument("<query>", `Search query for ${spec.name}`)
@@ -175,15 +181,16 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
           });
           writeOutput(readGlobalOptions(this), entityHeading(spec, `search: ${query}`), payload, spec.name);
         }),
-      {
-        allowSelect: true,
-        allowIncludeXpac: supportsXpac(spec.name),
-      },
-    );
+        {
+          allowSelect: true,
+          allowIncludeXpac: supportsXpac(spec.name),
+          allowSearch: false,
+        },
+      ));
   }
 
   if (spec.supportsGroup) {
-    addConfiguredListOptions(
+    addInheritedGlobalOptionHelp(addConfiguredListOptions(
       entity
         .command("group")
         .requiredOption("--by <field>", "group_by field")
@@ -192,71 +199,78 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
           const payload = await getClient().group(spec.name, options.by, parseListOptions(options));
           writeOutput(readGlobalOptions(this), entityHeading(spec, `group by ${options.by}`), payload, spec.name);
         }),
-      {
-        allowSelect: false,
-        allowIncludeXpac: supportsXpac(spec.name),
-      },
-    );
+        {
+          allowSelect: false,
+          allowIncludeXpac: supportsXpac(spec.name),
+          allowSearch: true,
+        },
+      ));
   }
 
   if (spec.supportsAutocomplete) {
-    entity
-      .command("autocomplete")
-      .argument("<query>", `Autocomplete ${spec.name}`)
-      .description(`Autocomplete names for ${spec.name}.`)
-        .action(async function (query: string, options: GlobalOptions) {
-          const payload = await getClient().autocomplete(spec.name, query);
-          void options;
-          writeOutput(readGlobalOptions(this), entityHeading(spec, `autocomplete: ${query}`), payload, spec.name);
-        });
+    addInheritedGlobalOptionHelp(
+      entity
+        .command("autocomplete")
+        .argument("<query>", `Autocomplete ${spec.name}`)
+        .description(`Autocomplete names for ${spec.name}.`)
+          .action(async function (query: string, options: GlobalOptions) {
+            const payload = await getClient().autocomplete(spec.name, query);
+            void options;
+            writeOutput(readGlobalOptions(this), entityHeading(spec, `autocomplete: ${query}`), payload, spec.name);
+          }),
+    );
   }
 
   if (spec.supportsRandom) {
-    entity
-      .command("random")
-      .option("--select <field>", "repeatable selected field", (value: string, previous: string[]) => {
-        previous.push(value);
-        return previous;
-      }, [])
-      .description(`Fetch a random ${spec.singular}.`)
-      .action(async function (options: GlobalOptions & { select?: string[] }) {
-        const payload = await getClient().random(spec.name, options.select);
-        writeOutput(readGlobalOptions(this), entityHeading(spec, "random"), payload, spec.name);
-      });
+    addInheritedGlobalOptionHelp(
+      entity
+        .command("random")
+        .option("--select <field>", "repeatable selected field", (value: string, previous: string[]) => {
+          previous.push(value);
+          return previous;
+        }, [])
+        .description(`Fetch a random ${spec.singular}.`)
+        .action(async function (options: GlobalOptions & { select?: string[] }) {
+          const payload = await getClient().random(spec.name, options.select);
+          writeOutput(readGlobalOptions(this), entityHeading(spec, "random"), payload, spec.name);
+        }),
+    );
   }
 
   if (spec.name === "works") {
-    entity
-      .command("download")
-      .argument("<id>", "OpenAlex work id or DOI")
-      .option("-o, --output <file>", "output file path; defaults to a DOI/OpenAlex-based filename in the current directory")
-      .option("--overwrite", "overwrite an existing output file", false)
-      .description("Download the best available direct full-text file for a work using OpenAlex metadata URLs.")
-      .action(async function (id: string, options: GlobalOptions & { output?: string; overwrite?: boolean }) {
-        const result = await downloadWorkFile(getClient(), id, {
-          output: options.output,
-          overwrite: options.overwrite,
-          onProgress: createDownloadProgressReporter(),
-        });
+    addInheritedGlobalOptionHelp(
+      entity
+        .command("download")
+        .argument("<id>", "OpenAlex work id or DOI")
+        .option("-o, --output <file>", "output file path; defaults to a DOI/OpenAlex-based filename in the current directory")
+        .option("--overwrite", "overwrite an existing output file", false)
+        .description("Download the best available direct full-text file for a work using OpenAlex metadata URLs.")
+        .action(async function (id: string, options: GlobalOptions & { output?: string; overwrite?: boolean }) {
+          const result = await downloadWorkFile(getClient(), id, {
+            output: options.output,
+            overwrite: options.overwrite,
+            onProgress: createDownloadProgressReporter(),
+          });
 
-        const lines = [
-          `Downloaded work full text: ${result.workId}`,
-          `saved: ${result.filePath}`,
-          `source: ${result.sourceField}`,
-          `url: ${result.finalUrl}`,
-          `bytes: ${result.bytes}`,
-        ];
+          const lines = [
+            `Downloaded work full text: ${result.workId}`,
+            `saved: ${result.filePath}`,
+            `source: ${result.sourceField}`,
+            `url: ${result.finalUrl}`,
+            `bytes: ${result.bytes}`,
+          ];
 
-        if (result.title) {
-          lines.splice(1, 0, `title: ${result.title}`);
-        }
+          if (result.title) {
+            lines.splice(1, 0, `title: ${result.title}`);
+          }
 
-        if (result.contentType) {
-          lines.push(`content-type: ${result.contentType}`);
-        }
+          if (result.contentType) {
+            lines.push(`content-type: ${result.contentType}`);
+          }
 
-        process.stdout.write(`${lines.join("\n")}\n`);
-      });
+          process.stdout.write(`${lines.join("\n")}\n`);
+        }),
+    );
 
     const relatedCommand = entity
       .command("related")
@@ -267,10 +281,11 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         writeOutput(readGlobalOptions(this), entityHeading(spec, `related: ${id}`), payload, spec.name);
       });
 
-    addConfiguredListOptions(relatedCommand, {
+    addInheritedGlobalOptionHelp(addConfiguredListOptions(relatedCommand, {
       allowSelect: true,
       allowIncludeXpac: true,
-    });
+      allowSearch: true,
+    }));
 
     const citedByCommand = entity
       .command("cited-by")
@@ -281,10 +296,11 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         writeOutput(readGlobalOptions(this), entityHeading(spec, `cited by: ${id}`), payload, spec.name);
       });
 
-    addConfiguredListOptions(citedByCommand, {
+    addInheritedGlobalOptionHelp(addConfiguredListOptions(citedByCommand, {
       allowSelect: true,
       allowIncludeXpac: true,
-    });
+      allowSearch: true,
+    }));
 
     const referencesCommand = entity
       .command("references")
@@ -295,10 +311,11 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         writeOutput(readGlobalOptions(this), entityHeading(spec, `references: ${id}`), payload, spec.name);
       });
 
-    addConfiguredListOptions(referencesCommand, {
+    addInheritedGlobalOptionHelp(addConfiguredListOptions(referencesCommand, {
       allowSelect: true,
       allowIncludeXpac: true,
-    });
+      allowSearch: true,
+    }));
   }
 
   return entity;

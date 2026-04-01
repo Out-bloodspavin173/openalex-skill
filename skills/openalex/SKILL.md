@@ -25,7 +25,13 @@ Invoke this skill when the user needs to:
 
 The CLI must be built and available. Check with:
 ```bash
-which openalex || npm exec --package=openalex-skill openalex -- --help
+openalex --help
+```
+
+If `openalex` is not installed yet, install it first:
+```bash
+npm install -g openalex-skill
+openalex --help
 ```
 
 For installation, persistent API key setup, and first-run verification, see `references/setup.md`.
@@ -59,8 +65,8 @@ openalex works search "paper title" --per-page 1
 ```
 
 **⚠️ ID usage restrictions:**
-- `cited-by` and `references` commands **require OpenAlex ID** (W-prefixed), DOI not supported
-- `get`, `search` and other commands support both DOI and OpenAlex ID
+- `cited-by`, `references`, and `related` support both DOI and OpenAlex ID
+- OpenAlex IDs are still the most reusable follow-up identifiers when chaining multiple commands
 
 ### Common Operations
 
@@ -85,16 +91,19 @@ openalex authors search "Author Name" --per-page 3
 openalex authors get https://orcid.org/0000-0002-3141-5845
 ```
 
-**Track citations (requires OpenAlex ID):**
+**Track citations:**
 ```bash
-# Papers that cite this work - ID only, DOI not supported
+# Papers that cite this work
 openalex works cited-by W2741809807 --per-page 5
+openalex works cited-by https://doi.org/10.1038/nature12373 --per-page 5
 
-# Papers this work references - ID only, DOI not supported
+# Papers this work references
 openalex works references W2741809807 --per-page 5
+openalex works references https://doi.org/10.1038/nature12373 --per-page 5
 
 # Related works
 openalex works related W2741809807 --per-page 5
+openalex works related https://doi.org/10.1038/nature12373 --per-page 5
 ```
 
 **Filter and sort:**
@@ -202,7 +211,7 @@ openalex works list --filter author.id:A5070829652 \
 # Search for a paper, note the ID from the secondary line
 openalex works search "attention is all you need" --per-page 3
 
-# Use the ID (e.g., W2741809807) for citation commands
+# Use the ID (e.g., W2741809807) or DOI for citation commands
 openalex works cited-by W2741809807 --per-page 10
 openalex works references W2741809807 --per-page 10
 ```

@@ -33,6 +33,22 @@ interface DownloadAttemptFailure {
   reason: string;
 }
 
+interface DownloadResolution {
+  finalUrl: string;
+  contentType?: string;
+  extension: string;
+}
+
+const TOP_LEVEL_CANDIDATE_PATHS: Array<{ field: string; path: string[] }> = [
+  { field: "primary_location.pdf_url", path: ["primary_location", "pdf_url"] },
+  { field: "best_oa_location.pdf_url", path: ["best_oa_location", "pdf_url"] },
+  { field: "open_access.oa_url", path: ["open_access", "oa_url"] },
+  { field: "content_urls.pdf", path: ["content_urls", "pdf"] },
+  { field: "content_urls.grobid_xml", path: ["content_urls", "grobid_xml"] },
+  { field: "primary_location.landing_page_url", path: ["primary_location", "landing_page_url"] },
+  { field: "best_oa_location.landing_page_url", path: ["best_oa_location", "landing_page_url"] },
+];
+
 export async function downloadWorkFile(
   client: OpenAlexClient,
   workId: string,
@@ -55,7 +71,7 @@ export async function downloadWorkFile(
     const candidate = candidates[index];
     reportProgress(options.onProgress, `Trying candidate ${index + 1}/${candidates.length}: ${candidate.field}`);
     try {
-      return await tryDownloadCandidate(work, candidate, options);
+      return await tryDownloadCandidate(client, work, candidate, options);
     } catch (error) {
       failures.push({
         candidate,
@@ -70,8 +86,84 @@ export async function downloadWorkFile(
 function collectDownloadCandidates(work: Record<string, unknown>): DownloadCandidate[] {
   const candidates: DownloadCandidate[] = [];
   const seen = new Set<string>();
+  const pushCandidate = createCandidateCollector(candidates, seen);
 
-  const pushCandidate = (field: string, value: unknown) => {
+  for (const candidatePath of TOP_LEVEL_CANDIDATE_PATHS) {
+    pushCandidate(candidatePath.field, readNestedString(work, candidatePath.path));
+  }
+
+  const locations = work.locations;
+  if (Array.isArray(locations)) {
+    for (let index = 0; index < locations.length; index += 1) {
+      const location = locations[index];
+      if (!isRecord(location)) {
+        continue;
+      }
+
+      for (const locationCandidate of collectLocationCandidates(location, index)) {
+        pushCandidate(locationCandidate.field, locationCandidate.value);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+async function tryDownloadCandidate(
+  client: OpenAlexClient,
+  work: Record<string, unknown>,
+  candidate: DownloadCandidate,
+  options: DownloadWorkOptions,
+): Promise<DownloadWorkResult> {
+  const parsedUrl = resolveRequestUrl(client, candidate.url);
+
+  const response = await fetch(parsedUrl, {
+    redirect: "follow",
+    headers: {
+      Accept: "application/pdf, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.1",
+      "User-Agent": DOWNLOAD_USER_AGENT,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`download request failed (${response.status} ${response.statusText})`);
+  }
+
+  const resolvedDownload = resolveDownloadResponse(response, parsedUrl);
+
+  reportProgress(
+    options.onProgress,
+    buildDownloadStartMessage(candidate.field, resolvedDownload.finalUrl, response.headers.get("content-length")),
+  );
+  const bytes = await readResponseBytes(response, options.onProgress);
+  if (bytes.length === 0) {
+    throw new Error("response body was empty");
+  }
+
+  const filePath = resolveOutputPath(work, resolvedDownload.extension, options.output);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+  if (!options.overwrite && (await pathExists(filePath))) {
+    throw new Error(`output file already exists: ${filePath}`);
+  }
+
+  await fs.writeFile(filePath, bytes);
+  reportProgress(options.onProgress, `Saved ${formatBytes(bytes.length)} to ${filePath}`);
+
+  return {
+    workId: readWorkId(work),
+    title: readWorkTitle(work),
+    filePath,
+    sourceField: candidate.field,
+    sourceUrl: candidate.url,
+    finalUrl: resolvedDownload.finalUrl,
+    contentType: resolvedDownload.contentType,
+    bytes: bytes.length,
+  };
+}
+
+function createCandidateCollector(candidates: DownloadCandidate[], seen: Set<string>): (field: string, value: unknown) => void {
+  return (field: string, value: unknown) => {
     if (typeof value !== "string") {
       return;
     }
@@ -96,85 +188,36 @@ function collectDownloadCandidates(work: Record<string, unknown>): DownloadCandi
       });
     }
   };
-
-  pushCandidate("primary_location.pdf_url", readNestedString(work, ["primary_location", "pdf_url"]));
-  pushCandidate("best_oa_location.pdf_url", readNestedString(work, ["best_oa_location", "pdf_url"]));
-  pushCandidate("open_access.oa_url", readNestedString(work, ["open_access", "oa_url"]));
-  pushCandidate("primary_location.landing_page_url", readNestedString(work, ["primary_location", "landing_page_url"]));
-  pushCandidate("best_oa_location.landing_page_url", readNestedString(work, ["best_oa_location", "landing_page_url"]));
-
-  const locations = work.locations;
-  if (Array.isArray(locations)) {
-    for (let index = 0; index < locations.length; index += 1) {
-      const location = locations[index];
-      if (!isRecord(location)) {
-        continue;
-      }
-
-      pushCandidate(`locations[${index}].pdf_url`, location.pdf_url);
-      pushCandidate(`locations[${index}].landing_page_url`, location.landing_page_url);
-    }
-  }
-
-  return candidates;
 }
 
-async function tryDownloadCandidate(
-  work: Record<string, unknown>,
-  candidate: DownloadCandidate,
-  options: DownloadWorkOptions,
-): Promise<DownloadWorkResult> {
-  let parsedUrl: URL;
+function collectLocationCandidates(location: Record<string, unknown>, index: number): Array<{ field: string; value: unknown }> {
+  return [
+    { field: `locations[${index}].pdf_url`, value: location.pdf_url },
+    { field: `locations[${index}].landing_page_url`, value: location.landing_page_url },
+  ];
+}
+
+function resolveRequestUrl(client: OpenAlexClient, rawUrl: string): URL {
+  const authorizedUrl = client.authorizeDownloadUrl(rawUrl);
   try {
-    parsedUrl = new URL(candidate.url);
+    return new URL(authorizedUrl);
   } catch {
-    throw new Error(`invalid URL: ${candidate.url}`);
+    throw new Error(`invalid URL: ${rawUrl}`);
   }
+}
 
-  const response = await fetch(parsedUrl, {
-    redirect: "follow",
-    headers: {
-      Accept: "application/pdf, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.1",
-      "User-Agent": DOWNLOAD_USER_AGENT,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`download request failed (${response.status} ${response.statusText})`);
-  }
-
-  const finalUrl = response.url || parsedUrl.toString();
+function resolveDownloadResponse(response: Response, requestUrl: URL): DownloadResolution {
+  const finalUrl = sanitizeReportedUrl(response.url || requestUrl.toString());
   const contentType = normalizeContentType(response.headers.get("content-type"));
-  const extension = inferExtension(contentType, finalUrl);
+  const extension = inferExtension(contentType, finalUrl, response.headers.get("content-disposition"));
   if (!extension) {
     throw new Error(`response was not a direct PDF/XML file (content-type: ${contentType ?? "unknown"})`);
   }
 
-  reportProgress(options.onProgress, buildDownloadStartMessage(candidate.field, finalUrl, response.headers.get("content-length")));
-  const bytes = await readResponseBytes(response, options.onProgress);
-  if (bytes.length === 0) {
-    throw new Error("response body was empty");
-  }
-
-  const filePath = resolveOutputPath(work, extension, options.output);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-
-  if (!options.overwrite && (await pathExists(filePath))) {
-    throw new Error(`output file already exists: ${filePath}`);
-  }
-
-  await fs.writeFile(filePath, bytes);
-  reportProgress(options.onProgress, `Saved ${formatBytes(bytes.length)} to ${filePath}`);
-
   return {
-    workId: readWorkId(work),
-    title: readWorkTitle(work),
-    filePath,
-    sourceField: candidate.field,
-    sourceUrl: candidate.url,
     finalUrl,
     contentType,
-    bytes: bytes.length,
+    extension,
   };
 }
 
@@ -364,21 +407,51 @@ function readWorkTitle(work: Record<string, unknown>): string | undefined {
   return typeof title === "string" ? title : undefined;
 }
 
-function inferExtension(contentType: string | undefined, finalUrl: string): string | undefined {
+function inferExtension(contentType: string | undefined, finalUrl: string, contentDisposition?: string | null): string | undefined {
   if (contentType?.includes("pdf")) {
     return ".pdf";
   }
 
-  const lowerUrl = finalUrl.toLowerCase();
-  if (lowerUrl.endsWith(".tei.xml")) {
+  const lowerPath = readLowerCasePathname(finalUrl);
+  const pathExtension = inferExtensionFromName(lowerPath);
+  if (pathExtension) {
+    return pathExtension;
+  }
+
+  if (contentType?.includes("xml") || lowerPath.endsWith(".xml")) {
+    return lowerPath.endsWith(".tei.xml") ? ".tei.xml" : ".xml";
+  }
+
+  const lowerFileName = readLowerCaseFileName(contentDisposition);
+  if (lowerFileName) {
+    return inferExtensionFromName(lowerFileName);
+  }
+
+  return undefined;
+}
+
+function inferExtensionFromName(value: string): string | undefined {
+  if (value.endsWith(".tei.xml.gz")) {
+    return ".tei.xml.gz";
+  }
+
+  if (value.endsWith(".xml.gz")) {
+    return ".xml.gz";
+  }
+
+  if (value.endsWith(".tei.xml")) {
     return ".tei.xml";
   }
 
-  if (contentType?.includes("xml") || lowerUrl.endsWith(".xml")) {
-    return lowerUrl.endsWith(".tei.xml") ? ".tei.xml" : ".xml";
+  if (value.endsWith(".grobid-xml") || value.endsWith(".grobid.xml")) {
+    return ".grobid.xml";
   }
 
-  if (lowerUrl.endsWith(".pdf")) {
+  if (value.endsWith(".xml")) {
+    return ".xml";
+  }
+
+  if (value.endsWith(".pdf")) {
     return ".pdf";
   }
 
@@ -391,6 +464,58 @@ function normalizeContentType(value: string | null): string | undefined {
   }
 
   return value.split(";", 1)[0]?.trim().toLowerCase();
+}
+
+function sanitizeReportedUrl(rawUrl: string): string {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+
+  parsedUrl.searchParams.delete("api_key");
+  parsedUrl.searchParams.delete("mailto");
+  return parsedUrl.toString();
+}
+
+function readLowerCaseFileName(contentDisposition: string | null | undefined): string | undefined {
+  if (!contentDisposition) {
+    return undefined;
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponentSafe(utf8Match[1]).toLowerCase();
+  }
+
+  const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1].toLowerCase();
+  }
+
+  const bareMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+  if (bareMatch?.[1]) {
+    return bareMatch[1].trim().toLowerCase();
+  }
+
+  return undefined;
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function readLowerCasePathname(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).pathname.toLowerCase();
+  } catch {
+    return rawUrl.toLowerCase();
+  }
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

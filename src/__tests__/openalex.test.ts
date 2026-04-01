@@ -8,7 +8,7 @@ import { buildCli } from "../cli.js";
 import { getConfig, getConfigPath } from "../config.js";
 import { downloadWorkFile } from "../download.js";
 import { OpenAlexClient } from "../openalex.js";
-import { readPackageVersion } from "../command-helpers.js";
+import { parseListOptions, readPackageVersion } from "../command-helpers.js";
 import { renderEnvelope } from "../render.js";
 
 function textToArrayBuffer(value: string): ArrayBuffer {
@@ -61,6 +61,19 @@ describe("OpenAlexClient", () => {
     expect(url.searchParams.get("include_xpac")).toBe("true");
     expect(url.searchParams.get("api_key")).toBe("test-key");
     expect(url.searchParams.get("mailto")).toBe("dev@example.com");
+  });
+
+  it("adds OpenAlex credentials only for content download URLs", () => {
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: "dev@example.com",
+    });
+
+    expect(client.authorizeDownloadUrl("https://content.openalex.org/works/W1.pdf")).toBe(
+      "https://content.openalex.org/works/W1.pdf?api_key=test-key&mailto=dev%40example.com",
+    );
+    expect(client.authorizeDownloadUrl("https://example.org/paper.pdf")).toBe("https://example.org/paper.pdf");
   });
 
   it("uses official citation filters for cited-by and references helpers", async () => {
@@ -458,6 +471,57 @@ describe("downloadWorkFile", () => {
 
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it("falls back to OpenAlex content XML with API credentials when metadata URLs are HTML", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W127",
+          display_name: "XML fallback paper",
+          primary_location: { pdf_url: "https://doi.org/10.1016/example" },
+          content_urls: { grobid_xml: "https://content.openalex.org/works/W127.grobid-xml" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://doi.org/10.1016/example",
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        arrayBuffer: async () => textToArrayBuffer("<html></html>"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://download.example.org/openalex-grobid-xml/W127.xml.gz?api_key=test-key&mailto=dev%40example.com",
+        headers: new Headers({ "content-type": "binary/octet-stream" }),
+        arrayBuffer: async () => textToArrayBuffer("<TEI>xml-data</TEI>"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: "dev@example.com",
+    });
+
+    const result = await downloadWorkFile(client, "W127", {
+      output: path.join(tempDir, "fallback.xml.gz"),
+    });
+
+    const contentRequestUrl = fetchMock.mock.calls[2]?.[0] as URL;
+    expect(contentRequestUrl.searchParams.get("api_key")).toBe("test-key");
+    expect(contentRequestUrl.searchParams.get("mailto")).toBe("dev@example.com");
+    expect(result.sourceField).toBe("content_urls.grobid_xml");
+    expect(result.finalUrl).toBe("https://download.example.org/openalex-grobid-xml/W127.xml.gz");
+    expect(fs.readFileSync(result.filePath, "utf8")).toBe("<TEI>xml-data</TEI>");
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
 });
 
 describe("config", () => {
@@ -569,6 +633,14 @@ describe("config", () => {
 
     expect(() => getConfig()).toThrow(/Failed to read OpenAlex config/);
     expect(() => getConfig()).toThrow(/Fix or remove the file and try again/);
+  });
+});
+
+describe("command helpers", () => {
+  it("rejects page and cursor being used together", () => {
+    expect(() => parseListOptions({ format: "summary", page: "2", cursor: "next-token" })).toThrow(
+      /Use either --page or --cursor, not both/,
+    );
   });
 });
 
@@ -719,6 +791,24 @@ describe("CLI integration", () => {
     const helpText = buildCli().helpInformation().replace(/\s+/g, " ");
     expect(helpText).toContain("works Search papers, look up DOIs, download open-access full text, and trace citations or related works.");
     expect(helpText).toContain("authors Find researchers, ORCID profiles, affiliations, and author-level metrics.");
+  });
+
+  it("shows inherited global options on entity subcommand help", () => {
+    const worksCommand = buildCli().commands.find((command) => command.name() === "works");
+    const searchCommand = worksCommand?.commands.find((command) => command.name() === "search");
+    const helpText = searchCommand?.helpInformation() ?? "";
+
+    expect(helpText).toContain("-f, --format <format>");
+    expect(helpText).toContain("--field <path>");
+  });
+
+  it("does not expose a redundant --search option on search subcommands", () => {
+    const worksCommand = buildCli().commands.find((command) => command.name() === "works");
+    const searchCommand = worksCommand?.commands.find((command) => command.name() === "search");
+    const helpText = searchCommand?.helpInformation() ?? "";
+
+    expect(helpText).not.toContain("--search <query>");
+    expect(helpText).toContain("Search query for works");
   });
 
   it("downloads a work file through the CLI", async () => {
@@ -1271,5 +1361,45 @@ describe("CLI integration", () => {
     expect(output).toContain("- external:author-123");
     expect(output).not.toContain("id: external:author-123");
     expect(output).toContain("orcid: https://orcid.org/0000-0002-3141-5845");
+  });
+
+  it("renders jsonl single-record output from business data instead of the transport envelope", () => {
+    const output = renderEnvelope(
+      { format: "jsonl", title: "Works get W1" },
+      {
+        rateLimit: { limit: 1000 },
+        requestUrl: "https://api.openalex.org/works/W1?api_key=test",
+        data: {
+          id: "https://openalex.org/W1",
+          display_name: "Test Paper",
+        },
+      },
+    );
+
+    expect(output.trim()).toBe('{"id":"https://openalex.org/W1","display_name":"Test Paper"}');
+  });
+
+  it("shows the actual next_cursor value in human-readable summaries", () => {
+    const output = renderEnvelope(
+      { format: "summary", title: "Works search: cursor" },
+      {
+        meta: { count: 50, page: 1, per_page: 25, next_cursor: "AoJ0ZXN0LWN1cnNvcg==" },
+        results: [{ id: "https://openalex.org/W1", display_name: "Cursor Paper" }],
+      },
+    );
+
+    expect(output).toContain("next_cursor=AoJ0ZXN0LWN1cnNvcg==");
+  });
+
+  it("strips upstream highlight markup from summary titles", () => {
+    const output = renderEnvelope(
+      { format: "summary", title: "Works search: lmerTest", entity: "works" },
+      {
+        results: [{ display_name: "<b>lmerTest</b>: package overview" }],
+      },
+    );
+
+    expect(output).toContain("lmerTest: package overview");
+    expect(output).not.toContain("<b>");
   });
 });

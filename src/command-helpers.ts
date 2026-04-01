@@ -8,6 +8,7 @@ import { OutputFormat } from "./render.js";
 export interface CommonOptionConfig {
   allowSelect?: boolean;
   allowIncludeXpac?: boolean;
+  allowSearch?: boolean;
 }
 
 export interface GlobalOptions {
@@ -52,19 +53,23 @@ export function addCommonListOptions(command: Command): Command {
   return addConfiguredListOptions(command, {
     allowSelect: true,
     allowIncludeXpac: false,
+    allowSearch: true,
   });
 }
 
 export function addConfiguredListOptions(command: Command, config: CommonOptionConfig): Command {
   command
     .option("--filter <expr>", "repeatable OpenAlex filter expression", collectRepeatable, [])
-    .option("--search <query>", "full text search query")
     .option("--sort <expr>", "OpenAlex sort expression")
     .option("--sample <n>", "sample size")
     .option("--seed <seed>", "sample seed")
     .option("--page <n>", "page number")
     .option("--per-page <n>", "results per page")
     .option("--cursor <cursor>", "cursor pagination token");
+
+  if (config.allowSearch ?? true) {
+    command.option("--search <query>", "full text search query");
+  }
 
   if (config.allowSelect) {
     command.option("--select <field>", "repeatable selected field", collectRepeatable, []);
@@ -78,6 +83,10 @@ export function addConfiguredListOptions(command: Command, config: CommonOptionC
 }
 
 export function parseListOptions(options: CommonListOptions): ListOptions {
+  if (options.page && options.cursor) {
+    throw new Error("Use either --page or --cursor, not both.");
+  }
+
   return {
     filter: options.filter,
     search: options.search,
@@ -90,6 +99,17 @@ export function parseListOptions(options: CommonListOptions): ListOptions {
     cursor: options.cursor,
     includeXpac: options.includeXpac,
   };
+}
+
+export function addInheritedGlobalOptionHelp(command: Command): Command {
+  return command
+    .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|auto", "summary")
+    .option(
+      "--field <path>",
+      "repeatable output field path for projection, e.g. title or authorships.author.display_name",
+      collectRepeatable,
+      [],
+    );
 }
 
 export function supportsXpac(entity: EntityName): boolean {

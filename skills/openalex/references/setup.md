@@ -38,8 +38,17 @@ openalex config show
 
 **Environment Variable (temporary):**
 
+Bash:
+
 ```bash
 export OPENALEX_API_KEY=your_api_key_here
+openalex works search "machine learning" --per-page 5
+```
+
+PowerShell:
+
+```powershell
+$env:OPENALEX_API_KEY="your_api_key_here"
 openalex works search "machine learning" --per-page 5
 ```
 

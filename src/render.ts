@@ -54,6 +54,10 @@ function renderJsonl(payload: unknown): string {
     return `${objectPayload.results.map((item) => JSON.stringify(item)).join("\n")}\n`;
   }
 
+  if (objectPayload.data !== undefined) {
+    return `${JSON.stringify(objectPayload.data)}\n`;
+  }
+
   return `${JSON.stringify(payload)}\n`;
 }
 
@@ -139,7 +143,7 @@ function renderMetaLine(meta: Record<string, unknown>): string {
     meta.count !== undefined ? `count=${String(meta.count)}` : undefined,
     meta.page !== undefined ? `page=${String(meta.page)}` : undefined,
     meta.per_page !== undefined ? `per_page=${String(meta.per_page)}` : undefined,
-    meta.next_cursor !== undefined && meta.next_cursor !== null ? "next_cursor=available" : undefined,
+    meta.next_cursor !== undefined && meta.next_cursor !== null ? `next_cursor=${String(meta.next_cursor)}` : undefined,
   ].filter(Boolean);
 
   return parts.length > 0 ? pc.dim(parts.join("  ")) : "";
@@ -159,9 +163,9 @@ function renderObject(item: Record<string, unknown>, entity?: EntityName | "rate
 
 function summarizeItem(item: Record<string, unknown>, index: number): string {
   const title =
-    (item.display_name as string | undefined) ??
+    cleanSummaryText((item.display_name as string | undefined) ??
     (item.title as string | undefined) ??
-    (item.id as string | undefined) ??
+    (item.id as string | undefined)) ??
     `Result ${index + 1}`;
 
   const secondary = [
@@ -210,15 +214,15 @@ function summarizeItemLines(
 
 function summarizeWorkLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.title ?? item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.title ?? item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const workType = typeof item.type === "string" && item.type !== "article" ? item.type : undefined;
   const secondary = [
     item.publication_year,
     workType,
     item.cited_by_count !== undefined ? `cited ${String(item.cited_by_count)}` : undefined,
     readWorkOaStatus(item),
-    readNestedString(item, ["primary_location", "source", "display_name"])?.replace(/^Proceedings of /, ""),
-    readNestedString(item, ["primary_topic", "display_name"]),
+    cleanSummaryText(readNestedString(item, ["primary_location", "source", "display_name"]))?.replace(/^Proceedings of /, ""),
+    cleanSummaryText(readNestedString(item, ["primary_topic", "display_name"])),
   ]
     .filter(Boolean)
     .map(String);
@@ -266,13 +270,13 @@ function normalizeDoiForComparison(value: string | undefined): string | undefine
 
 function summarizeAuthorLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
     item.cited_by_count !== undefined ? `cited ${String(item.cited_by_count)}` : undefined,
     hIndex !== undefined ? `h-index ${String(hIndex)}` : undefined,
-    readNestedStringFromArray(item, ["last_known_institutions"], ["display_name"]),
+    cleanSummaryText(readNestedStringFromArray(item, ["last_known_institutions"], ["display_name"])),
   ]
     .filter(Boolean)
     .map(String);
@@ -289,7 +293,7 @@ function summarizeAuthorLines(item: Record<string, unknown>, index: number): str
 
 function summarizeInstitutionLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     typeof item.country_code === "string" ? item.country_code : undefined,
@@ -313,7 +317,7 @@ function summarizeInstitutionLines(item: Record<string, unknown>, index: number)
 
 function summarizeSourceLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const meanCitedness = readNestedNumber(item, ["summary_stats", "2yr_mean_citedness"]);
   const secondary = [
     typeof item.issn_l === "string" ? `ISSN ${item.issn_l}` : undefined,
@@ -335,11 +339,11 @@ function summarizeSourceLines(item: Record<string, unknown>, index: number): str
 
 function summarizeTopicLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const taxonomy = [
-    readNestedString(item, ["field", "display_name"]),
-    readNestedString(item, ["subfield", "display_name"]),
-    readNestedString(item, ["domain", "display_name"]),
+    cleanSummaryText(readNestedString(item, ["field", "display_name"])),
+    cleanSummaryText(readNestedString(item, ["subfield", "display_name"])),
+    cleanSummaryText(readNestedString(item, ["domain", "display_name"])),
   ].filter(Boolean);
   const secondary = [
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
@@ -358,7 +362,7 @@ function summarizeTopicLines(item: Record<string, unknown>, index: number): stri
 
 function summarizePublisherLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const secondary = [
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
     item.cited_by_count !== undefined ? `cited ${String(item.cited_by_count)}` : undefined,
@@ -376,7 +380,7 @@ function summarizePublisherLines(item: Record<string, unknown>, index: number): 
 
 function summarizeFunderLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     typeof item.country_code === "string" ? item.country_code : undefined,
@@ -397,8 +401,8 @@ function summarizeFunderLines(item: Record<string, unknown>, index: number): str
 
 function summarizeConceptLines(item: Record<string, unknown>, index: number): string[] {
   const shortId = readOpenAlexIdentifier(item.id);
-  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
-  const ancestors = readNestedNames(item.ancestors).slice(0, 3);
+  const title = cleanSummaryText(String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`));
+  const ancestors = readNestedNames(item.ancestors).map((item) => cleanSummaryText(item)).slice(0, 3);
   const secondary = [
     typeof item.level === "number" ? `level ${String(item.level)}` : undefined,
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
@@ -463,7 +467,7 @@ function summarizeAuthors(value: unknown): string | undefined {
   }
 
   const names = value
-    .map((item) => readNestedString(item, ["author", "display_name"]))
+    .map((item) => cleanSummaryText(readNestedString(item, ["author", "display_name"])))
     .filter((name): name is string => Boolean(name));
   if (names.length === 0) {
     return undefined;
@@ -471,6 +475,14 @@ function summarizeAuthors(value: unknown): string | undefined {
 
   const visible = names.slice(0, 3).join(", ");
   return names.length > 3 ? `${visible} + ${names.length - 3} more` : visible;
+}
+
+function cleanSummaryText(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value.replace(/<\/?[^>]+>/g, "").trim() || undefined;
 }
 
 function readNestedString(value: unknown, path: string[]): string | undefined {
