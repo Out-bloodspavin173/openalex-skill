@@ -9,23 +9,15 @@ Choose the path that matches your environment:
 - skill-aware agents: install the repo skill with `npx skills add`
 - local shell or plain CLI use: install the npm package and run `openalex`
 
-Name mapping at a glance:
-
-These three names refer to the same tool in different contexts:
-
-- skill name: `openalex`
-- npm package: `openalex-skill`
-- executable command: `openalex`
-
 ### For skill-aware agents
 
 Install the `openalex` skill from this repository:
 
 ```bash
-npx skills add shiquda/openalex-skill --skill openalex -a claude-code
+npx skills add shiquda/openalex-skill --skill openalex
 ```
 
-`npx skills add` installs this repository's `openalex` skill into a supported agent environment. Use `--skill openalex` to select the skill under `skills/openalex/`, and use `-a` to choose the target agent integration.
+Then you can ask your agent to finish the setup steps according to the guide inside the skill, including CLI installation and API key configuration, or you can run those steps yourself with the instructions below.
 
 ### For local shell or plain CLI use
 
@@ -35,15 +27,6 @@ If your environment does not support repo-distributed skills yet, install the CL
 npm install -g openalex-skill
 openalex --help
 ```
-
-Official OpenAlex resources:
-
-- API docs: <https://docs.openalex.org>
-- LLM quick reference: <https://docs.openalex.org/api-guide-for-llms>
-- Official bulk-download CLI: <https://github.com/ourresearch/openalex-official>
-- API key signup: <https://openalex.org/settings/api>
-
-Use `openalex-official` for large bulk-download workflows. Use `openalex` for interactive querying, lookup, single-work download, citation tracing, grouping, and field projection.
 
 ## Why Use It
 
@@ -192,19 +175,8 @@ openalex config
 openalex config show
 openalex config path
 openalex config set api-key your_key_here
-openalex config set mailto you@example.com
-openalex config set base-url https://api.openalex.org
 openalex config unset api-key
 ```
-
-## Practical Notes
-
-- DOI, OpenAlex ID, and supported external IDs can all work with `works get`
-- `cited-by`, `references`, and `related` first resolve the work, then run the helper query
-- `download` first resolves the work, then tries direct file URLs such as `primary_location.pdf_url` and `open_access.oa_url`; if every candidate resolves to a landing page or unsupported content type, it fails with a per-URL reason list
-- if a work helper returns 404, verify the work first with `openalex works get <id-or-doi>`
-- for preprint or repository records, the queried DOI and the record DOI can differ; `summary` shows both when they diverge
-- `authors get` supports ORCID URLs; work filters use bare ORCID values like `author.orcid:0000-0002-3141-5845`
 
 ## Skills
 
@@ -220,3 +192,14 @@ npm test
 npm run typecheck
 npm run pack:dry-run
 ```
+
+## Useful Links
+
+Official OpenAlex resources:
+
+- API docs: <https://docs.openalex.org>
+- LLM quick reference: <https://docs.openalex.org/api-guide-for-llms>
+- Official bulk-download CLI: <https://github.com/ourresearch/openalex-official>
+- API key signup: <https://openalex.org/settings/api>
+
+Use `openalex-official` for large bulk-download workflows. Use `openalex` for interactive querying, lookup, single-work download, citation tracing, grouping, and field projection.
