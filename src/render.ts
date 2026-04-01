@@ -209,7 +209,8 @@ function summarizeItemLines(
 }
 
 function summarizeWorkLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.title ?? item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.title ?? item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const workType = typeof item.type === "string" && item.type !== "article" ? item.type : undefined;
   const secondary = [
     item.publication_year,
@@ -226,18 +227,14 @@ function summarizeWorkLines(item: Record<string, unknown>, index: number): strin
   const authors = summarizeAuthors(item.authorships);
   const preferredDoi = readPreferredWorkDoi(item);
   const alternateDoi = readAlternateWorkDoi(item, preferredDoi);
-  if (authors || preferredDoi || alternateDoi) {
-    lines.push(
-      `  ${pc.dim(
-        [
-          authors ? `authors: ${authors}` : undefined,
-          preferredDoi ? `doi: ${preferredDoi}` : undefined,
-          alternateDoi ? `record doi: ${alternateDoi}` : undefined,
-        ]
-          .filter(Boolean)
-          .join("  |  "),
-      )}`,
-    );
+  const identifierLine = formatSummaryIdentifierLine([
+    ["id", shortId !== title ? shortId : undefined],
+    ["authors", authors],
+    ["doi", preferredDoi],
+    ["record doi", alternateDoi],
+  ]);
+  if (identifierLine) {
+    lines.push(identifierLine);
   }
   return lines;
 }
@@ -268,7 +265,8 @@ function normalizeDoiForComparison(value: string | undefined): string | undefine
 }
 
 function summarizeAuthorLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
@@ -279,14 +277,19 @@ function summarizeAuthorLines(item: Record<string, unknown>, index: number): str
     .filter(Boolean)
     .map(String);
   const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
-  if (typeof item.orcid === "string") {
-    lines.push(`  ${pc.dim(`orcid: ${item.orcid}`)}`);
+  const identifierLine = formatSummaryIdentifierLine([
+    ["id", shortId !== title ? shortId : undefined],
+    ["orcid", typeof item.orcid === "string" ? item.orcid : undefined],
+  ]);
+  if (identifierLine) {
+    lines.push(identifierLine);
   }
   return lines;
 }
 
 function summarizeInstitutionLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     typeof item.country_code === "string" ? item.country_code : undefined,
@@ -298,14 +301,19 @@ function summarizeInstitutionLines(item: Record<string, unknown>, index: number)
     .filter(Boolean)
     .map(String);
   const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
-  if (typeof item.ror === "string") {
-    lines.push(`  ${pc.dim(`ror: ${item.ror}`)}`);
+  const identifierLine = formatSummaryIdentifierLine([
+    ["id", shortId !== title ? shortId : undefined],
+    ["ror", typeof item.ror === "string" ? item.ror : undefined],
+  ]);
+  if (identifierLine) {
+    lines.push(identifierLine);
   }
   return lines;
 }
 
 function summarizeSourceLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const meanCitedness = readNestedNumber(item, ["summary_stats", "2yr_mean_citedness"]);
   const secondary = [
     typeof item.issn_l === "string" ? `ISSN ${item.issn_l}` : undefined,
@@ -317,11 +325,17 @@ function summarizeSourceLines(item: Record<string, unknown>, index: number): str
   ]
     .filter(Boolean)
     .map(String);
-  return [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const identifierLine = formatSummaryIdentifierLine([["id", shortId !== title ? shortId : undefined]]);
+  if (identifierLine) {
+    lines.push(identifierLine);
+  }
+  return lines;
 }
 
 function summarizeTopicLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const taxonomy = [
     readNestedString(item, ["field", "display_name"]),
     readNestedString(item, ["subfield", "display_name"]),
@@ -334,11 +348,17 @@ function summarizeTopicLines(item: Record<string, unknown>, index: number): stri
   ]
     .filter(Boolean)
     .map(String);
-  return [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const identifierLine = formatSummaryIdentifierLine([["id", shortId !== title ? shortId : undefined]]);
+  if (identifierLine) {
+    lines.push(identifierLine);
+  }
+  return lines;
 }
 
 function summarizePublisherLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const secondary = [
     item.works_count !== undefined ? `works ${String(item.works_count)}` : undefined,
     item.cited_by_count !== undefined ? `cited ${String(item.cited_by_count)}` : undefined,
@@ -346,11 +366,17 @@ function summarizePublisherLines(item: Record<string, unknown>, index: number): 
   ]
     .filter(Boolean)
     .map(String);
-  return [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const identifierLine = formatSummaryIdentifierLine([["id", shortId !== title ? shortId : undefined]]);
+  if (identifierLine) {
+    lines.push(identifierLine);
+  }
+  return lines;
 }
 
 function summarizeFunderLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const hIndex = readNestedNumber(item, ["summary_stats", "h_index"]);
   const secondary = [
     typeof item.country_code === "string" ? item.country_code : undefined,
@@ -361,11 +387,17 @@ function summarizeFunderLines(item: Record<string, unknown>, index: number): str
   ]
     .filter(Boolean)
     .map(String);
-  return [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const identifierLine = formatSummaryIdentifierLine([["id", shortId !== title ? shortId : undefined]]);
+  if (identifierLine) {
+    lines.push(identifierLine);
+  }
+  return lines;
 }
 
 function summarizeConceptLines(item: Record<string, unknown>, index: number): string[] {
-  const title = String(item.display_name ?? item.id ?? `Result ${index + 1}`);
+  const shortId = readOpenAlexIdentifier(item.id);
+  const title = String(item.display_name ?? shortId ?? item.id ?? `Result ${index + 1}`);
   const ancestors = readNestedNames(item.ancestors).slice(0, 3);
   const secondary = [
     typeof item.level === "number" ? `level ${String(item.level)}` : undefined,
@@ -374,7 +406,33 @@ function summarizeConceptLines(item: Record<string, unknown>, index: number): st
   ]
     .filter(Boolean)
     .map(String);
-  return [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const lines = [secondary.length > 0 ? `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}` : `- ${title}`];
+  const identifierLine = formatSummaryIdentifierLine([["id", shortId !== title ? shortId : undefined]]);
+  if (identifierLine) {
+    lines.push(identifierLine);
+  }
+  return lines;
+}
+
+function formatSummaryIdentifierLine(parts: Array<[label: string, value: string | undefined]>): string | undefined {
+  const visible = parts
+    .filter(([, value]) => typeof value === "string" && value.length > 0)
+    .map(([label, value]) => `${label}: ${value}`);
+
+  if (visible.length === 0) {
+    return undefined;
+  }
+
+  return `  ${pc.dim(visible.join("  |  "))}`;
+}
+
+function readOpenAlexIdentifier(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) {
+    return undefined;
+  }
+
+  const matched = value.match(/^https?:\/\/openalex\.org\/([A-Z]\d+)$/i);
+  return matched?.[1]?.toUpperCase();
 }
 
 function readWorkOaStatus(item: Record<string, unknown>): string | undefined {

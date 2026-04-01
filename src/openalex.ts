@@ -182,7 +182,7 @@ export class OpenAlexClient {
     const response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        "User-Agent": "openalex-skill/0.1.1",
+        "User-Agent": "openalex-skill/0.1.2",
       },
     });
 
@@ -342,5 +342,6 @@ function extractShortOpenAlexId(value: unknown): string | undefined {
     return undefined;
   }
 
-  return value.replace("https://openalex.org/", "");
+  const matched = value.match(/^https?:\/\/openalex\.org\/([A-Z]\d+)$/i);
+  return matched?.[1]?.toUpperCase();
 }

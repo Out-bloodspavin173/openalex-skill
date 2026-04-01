@@ -112,6 +112,8 @@ Available formats:
 - `jsonl` - one JSON object per line
 - `markdown` - heading plus JSON block
 
+In `summary`, entity rows keep the human-readable title on the first line and include reusable identifiers such as OpenAlex IDs on the secondary line when available.
+
 Quick examples:
 
 ```bash

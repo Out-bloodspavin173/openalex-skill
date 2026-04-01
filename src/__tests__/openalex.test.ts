@@ -968,10 +968,12 @@ describe("CLI integration", () => {
       },
       {
         data: {
+          id: "https://openalex.org/W1234567890",
           title: "Attention Is All You Need",
           publication_year: 2025,
           type: "preprint",
           cited_by_count: 6512,
+          authorships: [{ author: { display_name: "Ashish Vaswani" } }, { author: { display_name: "Noam Shazeer" } }],
           ids: {
             doi: "https://doi.org/10.48550/arxiv.1706.03762",
           },
@@ -981,6 +983,8 @@ describe("CLI integration", () => {
     );
 
     expect(output).toContain("(2025 | preprint | cited 6512)");
+    expect(output).toContain("id: W1234567890");
+    expect(output).toContain("authors: Ashish Vaswani, Noam Shazeer");
     expect(output).toContain("doi: https://doi.org/10.48550/arxiv.1706.03762");
     expect(output).toContain("record doi: https://doi.org/10.65215/2q58a426");
   });
@@ -1005,5 +1009,90 @@ describe("CLI integration", () => {
 
     expect(output).toContain("doi: https://doi.org/10.48550/arXiv.1706.03762");
     expect(output).not.toContain("record doi:");
+  });
+
+  it("shows reusable short OpenAlex ids in non-work summary output", () => {
+    const authorOutput = renderEnvelope(
+      {
+        format: "summary",
+        title: "Authors search: hinton",
+        entity: "authors",
+      },
+      {
+        results: [
+          {
+            id: "https://openalex.org/A5070829652",
+            display_name: "Geoffrey Hinton",
+            works_count: 412,
+            cited_by_count: 123456,
+            orcid: "https://orcid.org/0000-0002-3141-5845",
+          },
+        ],
+      },
+    );
+
+    const sourceOutput = renderEnvelope(
+      {
+        format: "summary",
+        title: "Sources search: nature",
+        entity: "sources",
+      },
+      {
+        results: [
+          {
+            id: "https://openalex.org/S1983995261",
+            display_name: "Nature",
+            issn_l: "0028-0836",
+          },
+        ],
+      },
+    );
+
+    expect(authorOutput).toContain("id: A5070829652");
+    expect(authorOutput).toContain("orcid: https://orcid.org/0000-0002-3141-5845");
+    expect(sourceOutput).toContain("id: S1983995261");
+  });
+
+  it("uses short OpenAlex ids as summary titles without duplicating the id line", () => {
+    const output = renderEnvelope(
+      {
+        format: "summary",
+        title: "Works search: id only",
+        entity: "works",
+      },
+      {
+        results: [
+          {
+            id: "https://openalex.org/W2741809807",
+          },
+        ],
+      },
+    );
+
+    expect(output).toContain("- W2741809807");
+    expect(output).not.toContain("https://openalex.org/W2741809807");
+    expect(output).not.toContain("id: W2741809807");
+  });
+
+  it("does not label arbitrary non-OpenAlex strings as reusable ids", () => {
+    const output = renderEnvelope(
+      {
+        format: "summary",
+        title: "Authors search: fallback id",
+        entity: "authors",
+      },
+      {
+        results: [
+          {
+            id: "external:author-123",
+            orcid: "https://orcid.org/0000-0002-3141-5845",
+          },
+        ],
+      },
+    );
+
+    expect(output).toContain("- external:author-123");
+    expect(output).not.toContain("id: external:author-123");
+    expect(output).toContain("orcid: https://orcid.org/0000-0002-3141-5845");
   });
 });
