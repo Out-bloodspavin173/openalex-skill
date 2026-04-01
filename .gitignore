@@ -4,3 +4,4 @@ dist/
 .env.*
 coverage/
 *.log
+.tmp-home/

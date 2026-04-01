@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import fs from "node:fs";
 
 import { EntityName, EntitySpec, listEntities } from "./entities.js";
 import { ListOptions } from "./openalex.js";
@@ -33,10 +34,18 @@ export function createProgram(): Command {
   return new Command()
     .name("openalex")
     .description(`Human-friendly and agent-friendly CLI for OpenAlex. Entities: ${entityList}`)
+    .version(readPackageVersion(), "-V, --version", "display CLI version")
     .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|auto", "summary")
     .option("--field <path>", "repeatable output field path for projection, e.g. title or authorships.author.display_name", collectRepeatable, [])
     .showHelpAfterError(true)
     .showSuggestionAfterError();
+}
+
+export function readPackageVersion(): string {
+  const packageUrl = new URL("../package.json", import.meta.url);
+  const raw = fs.readFileSync(packageUrl, "utf8");
+  const parsed = JSON.parse(raw) as { version?: string };
+  return parsed.version ?? "0.0.0";
 }
 
 export function addCommonListOptions(command: Command): Command {

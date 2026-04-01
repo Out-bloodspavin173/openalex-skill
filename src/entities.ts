@@ -11,6 +11,7 @@ export type EntityName =
 export interface EntitySpec {
   name: EntityName;
   singular: string;
+  description: string;
   supportsSearch: boolean;
   supportsAutocomplete: boolean;
   supportsGroup: boolean;
@@ -21,6 +22,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   works: {
     name: "works",
     singular: "work",
+    description: "Search papers, look up DOIs, download open-access full text, and trace citations or related works.",
     supportsSearch: true,
     supportsAutocomplete: false,
     supportsGroup: true,
@@ -29,6 +31,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   authors: {
     name: "authors",
     singular: "author",
+    description: "Find researchers, ORCID profiles, affiliations, and author-level metrics.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -37,6 +40,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   sources: {
     name: "sources",
     singular: "source",
+    description: "Explore journals, conferences, repositories, and venue metadata.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -45,6 +49,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   institutions: {
     name: "institutions",
     singular: "institution",
+    description: "Look up universities, labs, and institution-level research output.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -53,6 +58,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   topics: {
     name: "topics",
     singular: "topic",
+    description: "Browse OpenAlex topic clusters and subject-level research areas.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -61,6 +67,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   publishers: {
     name: "publishers",
     singular: "publisher",
+    description: "Inspect publisher metadata and publication volume across venues.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -69,6 +76,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   funders: {
     name: "funders",
     singular: "funder",
+    description: "Find funding organizations and analyze funded research output.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,
@@ -77,6 +85,7 @@ const entitySpecs: Record<EntityName, EntitySpec> = {
   concepts: {
     name: "concepts",
     singular: "concept",
+    description: "Query legacy OpenAlex concepts and concept-level aggregates.",
     supportsSearch: true,
     supportsAutocomplete: true,
     supportsGroup: true,

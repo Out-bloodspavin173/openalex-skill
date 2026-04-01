@@ -1,8 +1,40 @@
 # OpenAlex Skill
 
-Install from npm as `openalex-skill`. Run it as `openalex`.
-
 `openalex` is a human-friendly and agent-friendly CLI for the OpenAlex API. It is designed for fast literature lookup, citation tracing, author/institution discovery, and field projection without forcing users into raw JSON by default.
+
+## Install in 10 Seconds
+
+Choose the path that matches your environment:
+
+- skill-aware agents: install the repo skill with `npx skills add`
+- local shell or plain CLI use: install the npm package and run `openalex`
+
+Name mapping at a glance:
+
+These three names refer to the same tool in different contexts:
+
+- skill name: `openalex`
+- npm package: `openalex-skill`
+- executable command: `openalex`
+
+### For skill-aware agents
+
+Install the `openalex` skill from this repository:
+
+```bash
+npx skills add shiquda/openalex-skill --skill openalex -a claude-code
+```
+
+`npx skills add` installs this repository's `openalex` skill into a supported agent environment. Use `--skill openalex` to select the skill under `skills/openalex/`, and use `-a` to choose the target agent integration.
+
+### For local shell or plain CLI use
+
+If your environment does not support repo-distributed skills yet, install the CLI directly:
+
+```bash
+npm install -g openalex-skill
+openalex --help
+```
 
 Official OpenAlex resources:
 
@@ -11,11 +43,7 @@ Official OpenAlex resources:
 - Official bulk-download CLI: <https://github.com/ourresearch/openalex-official>
 - API key signup: <https://openalex.org/settings/api>
 
-How this project differs from the official CLI:
-
-- `openalex-official` is the official bulk-download tool for metadata, PDFs, and TEI XML
-- `openalex` focuses on interactive API querying for humans and agents: search, get, cited-by, references, related, group, and field projection
-- use the official CLI for large offline download workflows; use this project for fast lookup and agent-driven exploration
+Use `openalex-official` for large bulk-download workflows. Use `openalex` for interactive querying, lookup, single-work download, citation tracing, grouping, and field projection.
 
 ## Why Use It
 
@@ -24,40 +52,24 @@ How this project differs from the official CLI:
 - server-side narrowing with `--select` when OpenAlex supports it
 - works, authors, sources, institutions, topics, publishers, funders, and concepts
 - helper flows for `related`, `cited-by`, and `references`
+- built-in single-work full-text download when OpenAlex exposes a direct file URL
 
 ## Quick Start
 
-Install globally:
-
 ```bash
 npm install -g openalex-skill
-```
-
-Set your API key:
-
-```bash
-export OPENALEX_API_KEY=your_key_here
-```
-
-Run the CLI:
-
-```bash
 openalex --help
+openalex --version
 openalex works search "llm agents" --per-page 5
 openalex works get https://doi.org/10.1038/nature12373
+openalex works download https://doi.org/10.1038/nature12373
 ```
 
-Package name vs command name:
-
-- npm package: `openalex-skill`
-- executable command: `openalex`
-
-If you are working from a local checkout before publish:
+Optional but recommended for higher quotas:
 
 ```bash
-npm install
-npm run build
-npm exec --package=. openalex -- --help
+openalex config set api-key your_key_here
+openalex config show
 ```
 
 ## Core Examples
@@ -73,6 +85,13 @@ Get a work by DOI or OpenAlex ID:
 ```bash
 openalex works get https://doi.org/10.1038/nature12373
 openalex works get W2741809807
+```
+
+Download the best available direct full-text file for one work:
+
+```bash
+openalex works download https://doi.org/10.1038/nature12373
+openalex works download W2741809807 --output ./nature12373.pdf
 ```
 
 Trace citations:
@@ -110,12 +129,11 @@ Available formats:
 - `jsonl` - one JSON object per line
 - `markdown` - heading plus JSON block
 
-Examples:
+Quick examples:
 
 ```bash
 openalex works search "crispr" --per-page 3
 openalex --format detail works get W2741809807
-openalex --format json works search "crispr" --per-page 3
 ```
 
 ## Field Control
@@ -147,59 +165,7 @@ Important `--select` caveats:
 - `abstract` and `abstract_inverted_index` are not selectable upstream
 - if you need abstract text, prefer `--field abstract` and avoid `--select` for that request
 
-## Agent Installation
-
-This package is meant to be easy for agents to install and invoke.
-
-The simplest rule is:
-
-- install package `openalex-skill`
-- run command `openalex`
-
-### Codex CLI
-
-```bash
-npm install -g openalex-skill
-openalex --help
-```
-
-### Claude Code
-
-If the agent can run shell commands directly, the same install works:
-
-```bash
-npm install -g openalex-skill
-openalex works search "llm agents" --per-page 5
-```
-
-If your environment supports repo-distributed skills:
-
-```bash
-npx skills add shiquda/openalex-skill -a claude-code
-```
-
-### OpenCode / generic local agents
-
-```bash
-npm install -g openalex-skill
-openalex works get https://doi.org/10.1038/nature12373
-```
-
-If your environment supports repo-distributed skills:
-
-```bash
-npx skills add shiquda/openalex-skill -a opencode
-```
-
-### Cursor / VS Code / other agent IDEs
-
-If the agent can access your local shell, install once and call `openalex` directly. If it prefers package execution, use:
-
-```bash
-npm exec --package=openalex-skill openalex -- --help
-```
-
-## Environment Variables
+## Configuration
 
 - `OPENALEX_API_KEY` - recommended for search and higher-volume use
 - `OPENALEX_BASE_URL` - defaults to `https://api.openalex.org`
@@ -212,25 +178,45 @@ export OPENALEX_API_KEY=your_key_here
 openalex works search "graph neural networks" --per-page 5
 ```
 
+`openalex` can also store user-level settings in `~/.openalex-skill/config.json`.
+
+Priority order:
+
+- environment variables override stored config
+- stored config overrides built-in defaults
+
+Useful commands:
+
+```bash
+openalex config
+openalex config show
+openalex config path
+openalex config set api-key your_key_here
+openalex config set mailto you@example.com
+openalex config set base-url https://api.openalex.org
+openalex config unset api-key
+```
+
 ## Practical Notes
 
 - DOI, OpenAlex ID, and supported external IDs can all work with `works get`
 - `cited-by`, `references`, and `related` first resolve the work, then run the helper query
+- `download` first resolves the work, then tries direct file URLs such as `primary_location.pdf_url` and `open_access.oa_url`; if every candidate resolves to a landing page or unsupported content type, it fails with a per-URL reason list
 - if a work helper returns 404, verify the work first with `openalex works get <id-or-doi>`
 - for preprint or repository records, the queried DOI and the record DOI can differ; `summary` shows both when they diverge
 - `authors get` supports ORCID URLs; work filters use bare ORCID values like `author.orcid:0000-0002-3141-5845`
 
 ## Skills
 
-This repository also includes an installable skill definition under `skills/openalex/` for skill-aware agent environments.
-
-Top-level README stays focused on the CLI. Skill-specific operational guidance lives in `skills/openalex/SKILL.md`.
+This repository also includes an installable skill definition under `skills/openalex/`. Skill-specific operational guidance lives in `skills/openalex/SKILL.md`.
 
 ## Development
 
 ```bash
+npm install
+npm run build
+npm exec --package=. openalex -- --help
 npm test
 npm run typecheck
-npm run build
 npm run pack:dry-run
 ```

@@ -1,9 +1,19 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import process from "process";
 
 import { buildCli } from "../cli.js";
+import { getConfig, getConfigPath } from "../config.js";
+import { downloadWorkFile } from "../download.js";
 import { OpenAlexClient } from "../openalex.js";
+import { readPackageVersion } from "../command-helpers.js";
 import { renderEnvelope } from "../render.js";
+
+function textToArrayBuffer(value: string): ArrayBuffer {
+  return new TextEncoder().encode(value).buffer;
+}
 
 describe("OpenAlexClient", () => {
   const fetchMock = vi.fn();
@@ -188,6 +198,211 @@ describe("OpenAlexClient", () => {
   });
 });
 
+describe("downloadWorkFile", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  it("downloads a PDF from the primary location URL", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W123",
+          doi: "https://doi.org/10.1038/nature12373",
+          display_name: "Example paper",
+          primary_location: { pdf_url: "https://example.org/paper.pdf" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://cdn.example.org/paper.pdf",
+        headers: new Headers({ "content-type": "application/pdf" }),
+        arrayBuffer: async () => textToArrayBuffer("pdf-data"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    const result = await downloadWorkFile(client, "W123", {
+      output: path.join(tempDir, "paper.pdf"),
+    });
+
+    expect(result.sourceField).toBe("primary_location.pdf_url");
+    expect(result.finalUrl).toBe("https://cdn.example.org/paper.pdf");
+    expect(result.filePath).toBe(path.join(tempDir, "paper.pdf"));
+    expect(fs.readFileSync(result.filePath, "utf8")).toBe("pdf-data");
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("falls back when the OA URL resolves to HTML instead of a file", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-download-"));
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W124",
+          display_name: "Fallback paper",
+          open_access: { oa_url: "https://example.org/landing" },
+          locations: [{ pdf_url: "https://example.org/file.pdf" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://example.org/landing",
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        arrayBuffer: async () => textToArrayBuffer("<html></html>"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://example.org/file.pdf",
+        headers: new Headers({ "content-type": "application/pdf" }),
+        arrayBuffer: async () => textToArrayBuffer("fallback-pdf"),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    const result = await downloadWorkFile(client, "W124", {
+      output: path.join(tempDir, "fallback.pdf"),
+    });
+
+    expect(result.sourceField).toBe("locations[0].pdf_url");
+    expect(fs.readFileSync(result.filePath, "utf8")).toBe("fallback-pdf");
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+});
+
+describe("config", () => {
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalApiKey = process.env.OPENALEX_API_KEY;
+  const originalBaseUrl = process.env.OPENALEX_BASE_URL;
+  const originalMailto = process.env.OPENALEX_MAILTO;
+
+  let tempHome: string;
+
+  beforeEach(() => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-skill-test-"));
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+    delete process.env.OPENALEX_API_KEY;
+    delete process.env.OPENALEX_BASE_URL;
+    delete process.env.OPENALEX_MAILTO;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+
+    if (originalApiKey === undefined) {
+      delete process.env.OPENALEX_API_KEY;
+    } else {
+      process.env.OPENALEX_API_KEY = originalApiKey;
+    }
+
+    if (originalBaseUrl === undefined) {
+      delete process.env.OPENALEX_BASE_URL;
+    } else {
+      process.env.OPENALEX_BASE_URL = originalBaseUrl;
+    }
+
+    if (originalMailto === undefined) {
+      delete process.env.OPENALEX_MAILTO;
+    } else {
+      process.env.OPENALEX_MAILTO = originalMailto;
+    }
+  });
+
+  it("loads config from the persistent user config file", () => {
+    fs.mkdirSync(path.dirname(getConfigPath()), { recursive: true });
+    fs.writeFileSync(
+      getConfigPath(),
+      `${JSON.stringify({ apiKey: "stored-key", baseUrl: "https://example.test", mailto: "stored@example.com" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(getConfig()).toEqual({
+      apiKey: "stored-key",
+      baseUrl: "https://example.test",
+      mailto: "stored@example.com",
+    });
+  });
+
+  it("prefers environment variables over stored config", () => {
+    fs.mkdirSync(path.dirname(getConfigPath()), { recursive: true });
+    fs.writeFileSync(
+      getConfigPath(),
+      `${JSON.stringify({ apiKey: "stored-key", baseUrl: "https://example.test", mailto: "stored@example.com" }, null, 2)}\n`,
+      "utf8",
+    );
+    process.env.OPENALEX_API_KEY = "env-key";
+    process.env.OPENALEX_BASE_URL = "https://env.test";
+    process.env.OPENALEX_MAILTO = "env@example.com";
+
+    expect(getConfig()).toEqual({
+      apiKey: "env-key",
+      baseUrl: "https://env.test",
+      mailto: "env@example.com",
+    });
+  });
+
+  it("treats empty environment variables as unset", () => {
+    fs.mkdirSync(path.dirname(getConfigPath()), { recursive: true });
+    fs.writeFileSync(
+      getConfigPath(),
+      `${JSON.stringify({ apiKey: "stored-key", baseUrl: "https://example.test", mailto: "stored@example.com" }, null, 2)}\n`,
+      "utf8",
+    );
+    process.env.OPENALEX_API_KEY = "";
+    process.env.OPENALEX_BASE_URL = "";
+    process.env.OPENALEX_MAILTO = "";
+
+    expect(getConfig()).toEqual({
+      apiKey: "stored-key",
+      baseUrl: "https://example.test",
+      mailto: "stored@example.com",
+    });
+  });
+});
+
 describe("CLI integration", () => {
   const fetchMock = vi.fn();
   const stdoutSpy = vi.spyOn(process.stdout, "write");
@@ -248,6 +463,123 @@ describe("CLI integration", () => {
     expect(String(firstCall)).toContain("title");
     expect(String(firstCall)).toContain("authorships.author.display_name");
     expect(String(firstCall)).toContain("Use these paths with --field <path>");
+  });
+
+  it("supports the version command and global version flag", async () => {
+    const cli = buildCli();
+    await cli.parseAsync(["version"], { from: "user" });
+
+    const firstCall = stdoutSpy.mock.calls[0]?.[0];
+    expect(String(firstCall)).toContain(readPackageVersion());
+    expect(buildCli().version()).toBe(readPackageVersion());
+  });
+
+  it("supports persistent config commands", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-cli-config-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+    delete process.env.OPENALEX_API_KEY;
+    delete process.env.OPENALEX_BASE_URL;
+    delete process.env.OPENALEX_MAILTO;
+
+    await buildCli().parseAsync(["config", "set", "api-key", "secret-token"], { from: "user" });
+    expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain("Saved apiKey=secr...oken");
+
+    stdoutSpy.mockClear();
+    await buildCli().parseAsync(["config"], { from: "user" });
+    const summary = String(stdoutSpy.mock.calls[0]?.[0]);
+    expect(summary).toContain("OpenAlex config");
+    expect(summary).toContain("stored.apiKey: secr...oken");
+
+    stdoutSpy.mockClear();
+    await buildCli().parseAsync(["config", "path"], { from: "user" });
+    expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain(path.join(".openalex-skill", "config.json"));
+
+    fs.rmSync(tempHome, { recursive: true, force: true });
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+  });
+
+  it("still supports version and config path when stored config is malformed", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-cli-bad-config-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+    fs.mkdirSync(path.join(tempHome, ".openalex-skill"), { recursive: true });
+    fs.writeFileSync(path.join(tempHome, ".openalex-skill", "config.json"), "{bad json", "utf8");
+
+    await buildCli().parseAsync(["version"], { from: "user" });
+    expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain(readPackageVersion());
+
+    stdoutSpy.mockClear();
+    await buildCli().parseAsync(["config", "path"], { from: "user" });
+    expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain(path.join(".openalex-skill", "config.json"));
+
+    fs.rmSync(tempHome, { recursive: true, force: true });
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+  });
+
+  it("shows richer entity descriptions in top-level help", async () => {
+    const helpText = buildCli().helpInformation().replace(/\s+/g, " ");
+    expect(helpText).toContain("works Search papers, look up DOIs, download open-access full text, and trace citations or related works.");
+    expect(helpText).toContain("authors Find researchers, ORCID profiles, affiliations, and author-level metrics.");
+  });
+
+  it("downloads a work file through the CLI", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openalex-cli-download-"));
+    const outputPath = path.join(tempDir, "cli-paper.pdf");
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          id: "https://openalex.org/W999",
+          display_name: "CLI paper",
+          primary_location: { pdf_url: "https://example.org/cli-paper.pdf" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        url: "https://example.org/cli-paper.pdf",
+        headers: new Headers({ "content-type": "application/pdf" }),
+        arrayBuffer: async () => textToArrayBuffer("cli-pdf"),
+      });
+
+    const cli = buildCli();
+    await cli.parseAsync(["works", "download", "W999", "--output", outputPath], { from: "user" });
+
+    const firstCall = String(stdoutSpy.mock.calls[0]?.[0]);
+    expect(firstCall).toContain("Downloaded work full text: W999");
+    expect(firstCall).toContain(`saved: ${outputPath}`);
+    expect(firstCall).toContain("source: primary_location.pdf_url");
+    expect(fs.readFileSync(outputPath, "utf8")).toBe("cli-pdf");
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("renders grouped responses as human-readable summaries", () => {

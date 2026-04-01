@@ -1,6 +1,14 @@
 import { Command } from "commander";
 
-import { getConfig } from "./config.js";
+import {
+  ConfigKey,
+  getConfig,
+  getConfigPath,
+  maskSecret,
+  readStoredConfig,
+  unsetStoredConfig,
+  updateStoredConfig,
+} from "./config.js";
 import {
   addConfiguredListOptions,
   CommonListOptions,
@@ -10,6 +18,7 @@ import {
   parseListOptions,
   supportsXpac,
 } from "./command-helpers.js";
+import { downloadWorkFile } from "./download.js";
 import { EntitySpec, listEntities } from "./entities.js";
 import { getFieldCatalog } from "./field-catalog.js";
 import { OpenAlexClient } from "./openalex.js";
@@ -17,13 +26,62 @@ import { renderEnvelope, resolveOutputFormat } from "./render.js";
 
 export function buildCli(): Command {
   const program = createProgram();
-  const client = new OpenAlexClient(getConfig());
+  const client = (): OpenAlexClient => new OpenAlexClient(getConfig());
+
+  const configCommand = program.command("config").description("Read and write persistent CLI configuration.");
+
+  configCommand.action(function () {
+    writeConfigSummary();
+  });
+
+  configCommand
+    .command("show")
+    .description("Show the effective and stored configuration.")
+    .action(function () {
+      writeConfigSummary();
+    });
+
+  configCommand
+    .command("path")
+    .description("Print the persistent config file path.")
+    .action(function () {
+      process.stdout.write(`${getConfigPath()}\n`);
+    });
+
+  program
+    .command("version")
+    .description("Show the installed CLI version.")
+    .action(function () {
+      process.stdout.write(`${program.version()}\n`);
+    });
+
+  configCommand
+    .command("set")
+    .argument("<key>", "apiKey|api-key | baseUrl|base-url | mailto")
+    .argument("<value>", "value to persist")
+    .description("Persist a configuration value to the user config file.")
+    .action(function (key: string, value: string) {
+      const normalized = parseConfigKey(key);
+      updateStoredConfig(normalized, value);
+      const displayValue = normalized === "apiKey" ? maskSecret(value) : value;
+      process.stdout.write(`Saved ${normalized}=${displayValue}\n`);
+    });
+
+  configCommand
+    .command("unset")
+    .argument("<key>", "apiKey|api-key | baseUrl|base-url | mailto")
+    .description("Remove a persisted configuration value from the user config file.")
+    .action(function (key: string) {
+      const normalized = parseConfigKey(key);
+      unsetStoredConfig(normalized);
+      process.stdout.write(`Removed ${normalized}\n`);
+    });
 
   program
     .command("rate-limit")
     .description("Show current OpenAlex credit status for the configured API key.")
     .action(async function () {
-      const payload = await client.getRateLimit();
+      const payload = await client().getRateLimit();
       writeOutput(readGlobalOptions(this), "Rate limit status", payload);
     });
 
@@ -34,8 +92,41 @@ export function buildCli(): Command {
   return program;
 }
 
-function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
-  const entity = new Command(spec.name).description(`Operate on OpenAlex ${spec.name}.`);
+function parseConfigKey(value: string): ConfigKey {
+  if (value === "apiKey" || value === "api-key") {
+    return "apiKey";
+  }
+
+  if (value === "baseUrl" || value === "base-url") {
+    return "baseUrl";
+  }
+
+  if (value === "mailto") {
+    return "mailto";
+  }
+
+  throw new Error(`Unsupported config key: ${value}. Use apiKey/api-key, baseUrl/base-url, or mailto.`);
+}
+
+function writeConfigSummary(): void {
+  const stored = readStoredConfig();
+  const effective = getConfig();
+  process.stdout.write(
+    [
+      "OpenAlex config",
+      `path: ${getConfigPath()}`,
+      `stored.apiKey: ${maskSecret(stored.apiKey) ?? "<unset>"}`,
+      `stored.baseUrl: ${stored.baseUrl ?? "<unset>"}`,
+      `stored.mailto: ${stored.mailto ?? "<unset>"}`,
+      `effective.apiKey: ${maskSecret(effective.apiKey) ?? "<unset>"}`,
+      `effective.baseUrl: ${effective.baseUrl}`,
+      `effective.mailto: ${effective.mailto ?? "<unset>"}`,
+    ].join("\n") + "\n",
+  );
+}
+
+function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): Command {
+  const entity = new Command(spec.name).description(spec.description);
 
   entity
     .command("fields")
@@ -49,7 +140,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
       .command("list")
       .description(`List ${spec.name} with filters, search, paging, and field selection.`)
       .action(async function (options: CommonListOptions) {
-        const payload = await client.list(spec.name, parseListOptions(options));
+        const payload = await getClient().list(spec.name, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, "list"), payload, spec.name);
       }),
     {
@@ -67,7 +158,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
     }, [])
     .description(`Get a single ${spec.singular}.`)
     .action(async function (id: string, options: GlobalOptions & { select?: string[] }) {
-      const payload = await client.get(spec.name, id, options.select);
+      const payload = await getClient().get(spec.name, id, options.select);
       writeOutput(readGlobalOptions(this), entityHeading(spec, `get ${id}`), payload, spec.name);
     });
 
@@ -78,7 +169,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
         .argument("<query>", `Search query for ${spec.name}`)
         .description(`Search ${spec.name}.`)
         .action(async function (query: string, options: CommonListOptions) {
-          const payload = await client.list(spec.name, {
+          const payload = await getClient().list(spec.name, {
             ...parseListOptions(options),
             search: query,
           });
@@ -98,7 +189,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
         .requiredOption("--by <field>", "group_by field")
         .description(`Group ${spec.name} by a field.`)
         .action(async function (options: CommonListOptions & { by: string }) {
-          const payload = await client.group(spec.name, options.by, parseListOptions(options));
+          const payload = await getClient().group(spec.name, options.by, parseListOptions(options));
           writeOutput(readGlobalOptions(this), entityHeading(spec, `group by ${options.by}`), payload, spec.name);
         }),
       {
@@ -114,7 +205,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
       .argument("<query>", `Autocomplete ${spec.name}`)
       .description(`Autocomplete names for ${spec.name}.`)
         .action(async function (query: string, options: GlobalOptions) {
-          const payload = await client.autocomplete(spec.name, query);
+          const payload = await getClient().autocomplete(spec.name, query);
           void options;
           writeOutput(readGlobalOptions(this), entityHeading(spec, `autocomplete: ${query}`), payload, spec.name);
         });
@@ -129,18 +220,49 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
       }, [])
       .description(`Fetch a random ${spec.singular}.`)
       .action(async function (options: GlobalOptions & { select?: string[] }) {
-        const payload = await client.random(spec.name, options.select);
+        const payload = await getClient().random(spec.name, options.select);
         writeOutput(readGlobalOptions(this), entityHeading(spec, "random"), payload, spec.name);
       });
   }
 
   if (spec.name === "works") {
+    entity
+      .command("download")
+      .argument("<id>", "OpenAlex work id or DOI")
+      .option("-o, --output <file>", "output file path; defaults to a DOI/OpenAlex-based filename in the current directory")
+      .option("--overwrite", "overwrite an existing output file", false)
+      .description("Download the best available direct full-text file for a work using OpenAlex metadata URLs.")
+      .action(async function (id: string, options: GlobalOptions & { output?: string; overwrite?: boolean }) {
+        const result = await downloadWorkFile(getClient(), id, {
+          output: options.output,
+          overwrite: options.overwrite,
+        });
+
+        const lines = [
+          `Downloaded work full text: ${result.workId}`,
+          `saved: ${result.filePath}`,
+          `source: ${result.sourceField}`,
+          `url: ${result.finalUrl}`,
+          `bytes: ${result.bytes}`,
+        ];
+
+        if (result.title) {
+          lines.splice(1, 0, `title: ${result.title}`);
+        }
+
+        if (result.contentType) {
+          lines.push(`content-type: ${result.contentType}`);
+        }
+
+        process.stdout.write(`${lines.join("\n")}\n`);
+      });
+
     const relatedCommand = entity
       .command("related")
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch related works using the work's related_works field.")
       .action(async function (id: string, options: CommonListOptions) {
-        const payload = await client.getRelatedWorks(id, parseListOptions(options));
+        const payload = await getClient().getRelatedWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `related: ${id}`), payload, spec.name);
       });
 
@@ -154,7 +276,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch works that cite the given work.")
       .action(async function (id: string, options: CommonListOptions) {
-        const payload = await client.getCitedByWorks(id, parseListOptions(options));
+        const payload = await getClient().getCitedByWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `cited by: ${id}`), payload, spec.name);
       });
 
@@ -168,7 +290,7 @@ function buildEntityCommand(spec: EntitySpec, client: OpenAlexClient): Command {
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch works referenced by the given work.")
       .action(async function (id: string, options: CommonListOptions) {
-        const payload = await client.getReferencedWorks(id, parseListOptions(options));
+        const payload = await getClient().getReferencedWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `references: ${id}`), payload, spec.name);
       });
 

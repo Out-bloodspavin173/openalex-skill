@@ -17,12 +17,18 @@ Invoke this skill when the user needs to:
 - Look up metadata by DOI, ORCID, or OpenAlex ID
 - Analyze publication trends or research metrics
 
+## Initial Setup
+
+**First time using this skill?** Read [references/setup.md](references/setup.md) for installation and API key configuration.
+
 ## Prerequisites
 
 The CLI must be built and available. Check with:
 ```bash
 which openalex || npm exec --package=openalex-skill openalex -- --help
 ```
+
+For installation, persistent API key setup, and first-run verification, see `references/setup.md`.
 
 ## Core Commands
 
