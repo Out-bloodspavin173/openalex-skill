@@ -74,4 +74,7 @@ openalex works search "test" --per-page 1
 
 # Check rate limit status
 openalex rate-limit
+
+# Download a paper PDF (requires open access)
+openalex works download https://doi.org/10.48550/arXiv.1706.03762
 ```

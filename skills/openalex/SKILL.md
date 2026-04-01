@@ -43,6 +43,25 @@ OpenAlex organizes data into 8 entity types:
 - `funders` - funding organizations
 - `concepts` - (legacy) subject classifications
 
+### OpenAlex ID Format
+
+**ID format:** OpenAlex IDs start with `W` (e.g., `W2626778328`). The `summary` format displays reusable IDs on a secondary line:
+
+```
+- Attention Is All You Need (2017 | cited 6519)
+  id: W2741809807  |  authors: Vaswani et al  |  doi: https://doi.org/10.48550/arXiv.1706.03762
+```
+
+**Get ID from search results:**
+```bash
+openalex works search "paper title" --per-page 1
+# Copy the `id: Wxxxx` from the output
+```
+
+**⚠️ ID usage restrictions:**
+- `cited-by` and `references` commands **require OpenAlex ID** (W-prefixed), DOI not supported
+- `get`, `search` and other commands support both DOI and OpenAlex ID
+
 ### Common Operations
 
 **Search for papers:**
@@ -66,12 +85,12 @@ openalex authors search "Author Name" --per-page 3
 openalex authors get https://orcid.org/0000-0002-3141-5845
 ```
 
-**Track citations:**
+**Track citations (requires OpenAlex ID):**
 ```bash
-# Papers that cite this work
+# Papers that cite this work - ID only, DOI not supported
 openalex works cited-by W2741809807 --per-page 5
 
-# Papers this work references
+# Papers this work references - ID only, DOI not supported
 openalex works references W2741809807 --per-page 5
 
 # Related works
@@ -99,144 +118,50 @@ openalex works group --by publication_year \
   --filter author.id:A5070829652
 ```
 
+**Download full-text PDF:**
+```bash
+# Download the best available open access PDF for a work
+openalex works download https://doi.org/10.48550/arXiv.1706.03762
+
+# Specify output filename
+openalex works download W2741809807 -o paper.pdf
+
+# Overwrite existing file
+openalex works download W2741809807 --overwrite
+```
+
+The download command tries multiple sources in order:
+1. `primary_location.pdf_url`
+2. `best_oa_location.pdf_url`
+3. `open_access.oa_url`
+4. `primary_location.landing_page_url`
+5. `best_oa_location.landing_page_url`
+6. Any `locations[].pdf_url` or `locations[].landing_page_url`
+
+Default filename is based on DOI or OpenAlex ID (sanitized for filesystem safety).
+
 ## Output Formats
 
-The CLI defaults to `summary` format, which is concise and human-readable. Use `--format <type>` to change output style.
+The CLI defaults to `summary` format. For detailed format options, see [references/output-formats.md](references/output-formats.md).
 
-### Format Options
+**Quick reference:**
+- `summary` (default) - Concise one-line format, ~2KB for 5 results
+- `detail` - Human-readable with inline lists for repeated fields
+- `json` - Full structured payload, ~40KB-268KB per query
+- `--field <path>` - Client-side projection to extract specific fields
+- `--select <field>` - Server-side selection to reduce network payload
 
-- **`summary`** (default, recommended for AI) - Concise one-line format with key metadata
-  - Example: `- Attention Is All You Need (2017 | cited 6519 | OA gold | Neural Information Processing Systems)`
-  - Token usage: ~2KB for 5 results
-  - Each entity type has specialized formatting (works show citations, authors show h-index, etc.)
-
-- **`detail`** - Human-readable structured output with business fields only
-  - Hides transport noise (request URLs, rate-limit headers)
-  - Reconstructs friendly fields like `abstract` from inverted index
-  - **Inlines short projected scalar lists** for readability (e.g., authors displayed as "Alice, Bob, Charlie")
-  - Good for exploring data structure without JSON verbosity
-
-- **`json`** - Full structured payload
-  - Token usage: ~40KB-268KB per query
-  - Use only when you need complete data or specific nested fields
-
-- **`jsonl`** - One JSON object per line
-  - Good for streaming or line-by-line processing
-
-- **`markdown`** - Heading + JSON block
-  - Useful for documentation or reports
-
-### Field Projection with `--field`
-
-**Client-side projection** - fetch full payload first, then display only requested fields:
-
+**Common patterns:**
 ```bash
-# Discover available fields first
-openalex works fields
+# Extract specific fields
+openalex works get W2741809807 --field title --field abstract
 
-# Extract specific fields (repeatable)
-openalex works get W2741809807 \
-  --field title \
-  --field abstract \
-  --field authorships.author.display_name \
-  --field doi
-
-# detail format with field projection (authors shown inline)
-openalex works search "crispr" --per-page 3 \
-  --format detail \
-  --field title \
-  --field abstract \
-  --field cited_by_count
-```
-
-**Key behaviors:**
-- `--field` works with `detail`, `json`, `jsonl`, and `markdown` formats
-- When requesting `abstract`, CLI reconstructs it from `abstract_inverted_index` when possible
-- In `detail` format, repeated scalar paths like `authorships.author.display_name` are shown as **inline readable lists** instead of nested structures
-
-### Server-side Selection with `--select`
-
-**Server-side filtering** - ask OpenAlex API to return fewer fields (reduces network payload):
-
-```bash
-openalex works search "crispr" \
-  --select id \
-  --select title \
-  --select cited_by_count
-```
-
-**Key behaviors:**
-- `--select` reduces upstream payload size
-- Available on `get`, `random`, `list`, `search`, `related`, `cited-by`, and `references`
-- `group` does not support `--select`, but still supports `--field`
-- OpenAlex only supports selecting root-level fields
-- `abstract` and `abstract_inverted_index` are not selectable upstream
-
-### Combining `--select` and `--field`
-
-**Best practice**: Use `--select` for network efficiency, `--field` for presentation control:
-
-```bash
-# Server-side: only fetch necessary fields
-# Client-side: display as curated view
-openalex works search "crispr" --per-page 3 \
-  --select id \
-  --select title \
-  --select cited_by_count \
-  --field title \
-  --field cited_by_count
-```
-
-**Important**: `--field abstract` and `--select` do not combine well, because OpenAlex does not let you select abstract fields upstream. If you need abstract text, avoid `--select` for that request and let the CLI reconstruct it from the full work payload.
-
-### Format Selection Guide
-
-**Use `summary` when:**
-- Browsing or exploring results
-- User wants a quick overview
-- You need basic metadata (title, year, citations, authors)
-- Token efficiency matters (99% reduction vs JSON)
-
-**Use `detail` when:**
-- You need structured data but JSON is too verbose
-- Exploring nested fields without transport noise
-- Want readable output with inline lists for repeated fields
-
-**Use `--field` projection when:**
-- You know exactly which fields you need
-- Want to minimize tokens while keeping structure
-- Need specific nested paths (e.g., `authorships.author.display_name`)
-
-**Use `--select` when:**
-- You want to reduce network payload from OpenAlex
-- The endpoint supports official OpenAlex field selection
-- Combining with `--field` for both efficiency and presentation
-
-**Use `json` when:**
-- You need the complete raw payload
-- Programmatic processing of all fields required
-- User explicitly asks for structured data
-
-**Example comparison:**
-```bash
-# Most efficient: ~2KB for 5 results
-openalex works search "LLM agents" --per-page 5
-
-# Structured but readable with inline lists: ~10KB for 5 results
-openalex works search "LLM agents" --per-page 5 --format detail
-
-# Targeted extraction: ~5KB for 5 results
-openalex works search "LLM agents" --per-page 5 \
-  --format detail --field title --field abstract --field cited_by_count
-
-# Network optimized + presentation curated
-openalex works search "LLM agents" --per-page 5 \
-  --select title --select cited_by_count \
+# Combine server-side + client-side for efficiency
+openalex works search "crispr" --select title --select cited_by_count \
   --field title --field cited_by_count
-
-# Full payload: ~268KB for 5 results
-openalex works search "LLM agents" --per-page 5 --format json
 ```
+
+**Note:** `--field abstract` and `--select` don't combine well; use `--field abstract` alone when you need abstract text.
 
 ## Workflow Patterns
 
@@ -272,14 +197,13 @@ openalex works list --filter author.id:A5070829652 \
 ```
 
 ### Pattern 3: Citation Analysis
+
 ```bash
-# Get a paper
-openalex works get W2741809807
+# Search for a paper, note the ID from the secondary line
+openalex works search "attention is all you need" --per-page 3
 
-# See who cited it
+# Use the ID (e.g., W2741809807) for citation commands
 openalex works cited-by W2741809807 --per-page 10
-
-# See what it references
 openalex works references W2741809807 --per-page 10
 ```
 
@@ -315,40 +239,31 @@ openalex works search "retrieval augmented generation" --per-page 3 \
 
 **Search too broad? Add filters:**
 ```bash
-# Start broad
-openalex works search "self-adaptive agent framework" --per-page 5
-
-# Narrow with filters
 openalex works search "self-adaptive agent framework" \
   --filter publication_year:>2022 \
   --filter type:article \
   --per-page 5
 ```
 
-**Author lookup returns nothing? Verify the ID:**
-```bash
-# Wrong: using incorrect author.id format
-openalex works list --filter authorships.author.id:A1969205030  # may fail
-
-# Correct: use author.orcid or bare author.id
-openalex works list --filter author.orcid:0000-0002-3141-5845
-openalex works list --filter author.id:A5070829652
-```
-
 **Have a DOI? Use direct lookup:**
 ```bash
-# Most reliable way to find a specific paper
 openalex works get https://doi.org/10.1038/nature12373
-
-# Preprint and repository records may show both the queried DOI and a different record DOI
-openalex works get https://doi.org/10.48550/arXiv.1706.03762
 ```
+
+### Pattern 7: Download Full-Text Papers
+
+```bash
+# Download by DOI or OpenAlex ID
+openalex works download https://doi.org/10.48550/arXiv.1706.03762
+openalex works download W2626778328 -o paper.pdf --overwrite
+```
+
+Download tries multiple sources in order: `primary_location.pdf_url`, `best_oa_location.pdf_url`, `open_access.oa_url`, then landing pages.
 
 **`--select` caveats:**
 - OpenAlex `select` only supports root-level fields
 - `group` and `autocomplete` do not support `select`
 - `abstract` and `abstract_inverted_index` are not selectable upstream
-- if you need abstract text, use `--field abstract` or fetch the full work object first
 
 **ORCID format matters:**
 ```bash
@@ -376,9 +291,40 @@ openalex authors get https://orcid.org/0000-0002-3141-5845
 - **ORCID filters use bare ORCID value**, not the `https://orcid.org/` URL form
 - If author work lookup returns nothing, use `author.orcid` instead of `author.id`
 - If `cited-by` or `references` fails with 404, verify the work first with `works get`
-- `related` follows the same work lookup rule and now accepts list-style options such as `--per-page`
 - For some preprint or repository records, the queried DOI and the record DOI may differ; use `detail` or `json` when provenance matters
 - Check rate limits with: `openalex rate-limit`
+
+## Configuration Commands
+
+The CLI supports persistent configuration for API keys and other settings.
+
+**View current configuration:**
+```bash
+openalex config show
+```
+
+**Set API key (recommended):**
+```bash
+openalex config set api-key your_key_here
+```
+
+**Other config options:**
+```bash
+openalex config set base-url https://api.openalex.org
+openalex config set mailto you@example.com
+```
+
+**View config file path:**
+```bash
+openalex config path
+```
+
+**Remove a setting:**
+```bash
+openalex config unset api-key
+```
+
+Configuration is stored in `~/.openalex-skill/config.json`. Environment variables (`OPENALEX_API_KEY`, `OPENALEX_BASE_URL`, `OPENALEX_MAILTO`) override stored config.
 
 ## Common Filters
 

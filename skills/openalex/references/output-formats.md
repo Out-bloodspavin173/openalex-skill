@@ -5,11 +5,19 @@ Detailed guide for output formats and field selection options.
 ## Format Options
 
 ### `summary` (default, recommended for AI)
-Concise one-line format with key metadata.
+Concise one-line format with key metadata and reusable identifiers.
 
-Example: `- Attention Is All You Need (2017 | cited 6519 | OA gold | Neural Information Processing Systems)`
+Example:
+```
+- Attention Is All You Need (2017 | cited 6519 | OA gold | Neural Information Processing Systems)
+  id: W2741809807  |  authors: Vaswani, Shazeer, Parmar + 5 more  |  doi: https://doi.org/10.48550/arXiv.1706.03762
+```
 
-When an entity has a stable identifier, `summary` also includes a compact secondary line with reusable IDs such as `W2741809807` or `A5070829652`.
+The secondary line shows reusable IDs you can copy for follow-up commands:
+- **Works**: `id` (W-prefixed, required for `cited-by`/`references`), `authors`, `doi`
+- **Authors**: `id` (A-prefixed), `orcid`
+- **Institutions**: `id` (I-prefixed), `ror`
+- Other entities show their respective IDs
 
 - Token usage: ~2KB for 5 results
 - Each entity type has specialized formatting (works show citations, authors show h-index, etc.)
