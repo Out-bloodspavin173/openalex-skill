@@ -1,0 +1,59 @@
+{
+  "name": "openalex-skill",
+  "version": "0.1.0",
+  "description": "Human-friendly and agent-friendly CLI for the OpenAlex API.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "openalex": "dist/index.js"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "openalex",
+    "cli",
+    "academic-search",
+    "research",
+    "bibliometrics",
+    "typescript"
+  ],
+  "author": "shiquda",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shiquda/openalex-skill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shiquda/openalex-skill/issues"
+  },
+  "homepage": "https://github.com/shiquda/openalex-skill#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "skills/"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}
