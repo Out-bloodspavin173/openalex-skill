@@ -66,6 +66,7 @@ openalex works search "paper title" --per-page 1
 
 **⚠️ ID usage restrictions:**
 - `cited-by`, `references`, and `related` support both DOI and OpenAlex ID
+- bare DOIs like `10.1038/nature12373` and `doi:10.1038/nature12373` are normalized automatically for work lookups and helpers
 - OpenAlex IDs are still the most reusable follow-up identifiers when chaining multiple commands
 
 ### Common Operations
@@ -79,6 +80,7 @@ openalex works search "your query" --per-page 5
 ```bash
 openalex works get W2741809807
 openalex works get https://doi.org/10.1038/nature12373
+openalex works get 10.1038/nature12373
 ```
 
 **Find author:**
@@ -95,6 +97,7 @@ openalex authors get https://orcid.org/0000-0002-3141-5845
 ```bash
 # Papers that cite this work
 openalex works cited-by W2741809807 --per-page 5
+openalex works cited-by 10.1038/nature12373 --per-page 5
 openalex works cited-by https://doi.org/10.1038/nature12373 --per-page 5
 
 # Papers this work references
@@ -131,6 +134,7 @@ openalex works group --by publication_year \
 ```bash
 # Download the best available open access PDF for a work
 openalex works download https://doi.org/10.48550/arXiv.1706.03762
+openalex works download 10.48550/arXiv.1706.03762
 
 # Specify output filename
 openalex works download W2741809807 -o paper.pdf
@@ -157,6 +161,7 @@ The CLI defaults to `summary` format. For detailed format options, see [referenc
 - `summary` (default) - Concise one-line format, ~2KB for 5 results
 - `detail` - Human-readable with inline lists for repeated fields
 - `json` - Full structured payload, ~40KB-268KB per query
+- `bibtex` - BibTeX entries for work records
 - `--field <path>` - Client-side projection to extract specific fields
 - `--select <field>` - Server-side selection to reduce network payload
 
@@ -164,6 +169,9 @@ The CLI defaults to `summary` format. For detailed format options, see [referenc
 ```bash
 # Extract specific fields
 openalex works get W2741809807 --field title --field abstract
+
+# Export a work as BibTeX
+openalex works get 10.1038/nature12373 --format bibtex
 
 # Combine server-side + client-side for efficiency
 openalex works search "crispr" --select title --select cited_by_count \
@@ -294,6 +302,7 @@ openalex authors get https://orcid.org/0000-0002-3141-5845
 - Use `--select` for network efficiency when you know which fields you need
 - Combine `--select` and `--field` for optimal performance and presentation
 - Use `--per-page` to control result count (default varies by endpoint)
+- Use `--all` to auto-follow cursor pagination for list-style commands
 - Filters use `:` syntax: `field:value`, `field:>value`, `field:<value`
 - Sort uses `:` syntax: `field:asc` or `field:desc`
 - DOIs and OpenAlex IDs are interchangeable in most commands
@@ -343,6 +352,7 @@ For `works`:
 - `type:article` or `type:review`
 - `author.id:A5070829652`
 - `author.orcid:0000-0002-3141-5845`
+- institution-related filters are passed through as-is; verify the exact OpenAlex path with `--format json` if needed
 - `primary_location.source.id:S123456` (journal)
 
 For `authors`:

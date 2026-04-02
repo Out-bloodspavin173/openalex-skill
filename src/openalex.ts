@@ -1,6 +1,10 @@
 import { CliConfig } from "./config.js";
 import { EntityName } from "./entities.js";
 
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRY_ATTEMPTS = 5;
+const RETRY_BASE_DELAY_MS = 100;
+
 export interface ApiMeta {
   count?: number;
   db_response_time_ms?: number;
@@ -36,6 +40,7 @@ export interface ListOptions {
   page?: number;
   perPage?: number;
   cursor?: string;
+  all?: boolean;
   includeXpac?: boolean;
 }
 
@@ -71,7 +76,7 @@ export class OpenAlexClient {
 
   public async get(entity: EntityName, id: string, select?: string[]): Promise<ApiEnvelope<Record<string, unknown>>> {
     const query = this.createQuery({ select });
-    const path = `/${entity}/${encodeURIComponent(id)}`;
+    const path = `/${entity}/${encodeURIComponent(entity === "works" ? normalizeWorkIdentifier(id) : id)}`;
     return this.request<Record<string, unknown>>(path, query, false);
   }
 
@@ -86,19 +91,11 @@ export class OpenAlexClient {
   }
 
   public async list(entity: EntityName, options: ListOptions = {}): Promise<ApiEnvelope<Record<string, unknown>>> {
-    const query = this.createQuery({
-      filter: joinMulti(options.filter),
-      search: options.search,
-      sort: options.sort,
-      select: joinMulti(options.select),
-      sample: numberToString(options.sample),
-      seed: options.seed,
-      page: numberToString(options.page),
-      per_page: numberToString(options.perPage),
-      cursor: options.cursor,
-      include_xpac: options.includeXpac ? "true" : undefined,
-    });
+    if (options.all) {
+      return this.requestAllListPages<Record<string, unknown>>(`/${entity}`, options);
+    }
 
+    const query = this.createListQuery(options);
     return this.request<Record<string, unknown>>(`/${entity}`, query, true);
   }
 
@@ -116,11 +113,28 @@ export class OpenAlexClient {
       include_xpac: options.includeXpac ? "true" : undefined,
     });
 
+    if (options.all) {
+      if (options.page !== undefined) {
+        throw new Error("Use cursor pagination for --all group requests.");
+      }
+
+      return this.requestAllGroupPages<Record<string, unknown>>(`/${entity}`, query, options.perPage);
+    }
+
     return this.request<Record<string, unknown>>(`/${entity}`, query, true);
   }
 
   public async listFromUrl(url: string, options: ListOptions = {}): Promise<ApiEnvelope<Record<string, unknown>>> {
     const absoluteUrl = new URL(url);
+
+    if (options.all) {
+      if (options.page !== undefined) {
+        throw new Error("Use cursor pagination for --all URL requests.");
+      }
+
+      applyListOptionsToSearchParams(absoluteUrl.searchParams, { ...options, cursor: options.cursor ?? "*" });
+      return this.requestAllPagesFromUrl<Record<string, unknown>>(absoluteUrl, options.perPage, "results");
+    }
 
     applyListOptionsToSearchParams(absoluteUrl.searchParams, options);
     return this.requestAbsolute<Record<string, unknown>>(absoluteUrl.toString(), true);
@@ -202,16 +216,29 @@ export class OpenAlexClient {
   }
 
   private async performRequest<T>(url: URL, expectsList: boolean): Promise<ApiEnvelope<T>> {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "openalex-skill/0.1.2",
-      },
-    });
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
+      response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "openalex-skill/0.1.2",
+        },
+      });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(formatOpenAlexError(url, response.status, response.statusText, body));
+      if (response.ok) {
+        break;
+      }
+
+      if (!shouldRetry(response.status) || attempt === MAX_RETRY_ATTEMPTS - 1) {
+        const body = await response.text();
+        throw new Error(formatOpenAlexError(url, response.status, response.statusText, body));
+      }
+
+      await sleep(resolveRetryDelayMs(response.headers, attempt));
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`OpenAlex request failed before receiving a valid response: ${url.toString()}`);
     }
 
     const json = (await response.json()) as Record<string, unknown>;
@@ -248,6 +275,88 @@ export class OpenAlexClient {
       }
     }
     return query;
+  }
+
+  private createListQuery(options: ListOptions): URLSearchParams {
+    return this.createQuery({
+      filter: joinMulti(options.filter),
+      search: options.search,
+      sort: options.sort,
+      select: joinMulti(options.select),
+      sample: numberToString(options.sample),
+      seed: options.seed,
+      page: numberToString(options.page),
+      per_page: numberToString(options.perPage),
+      cursor: options.cursor,
+      include_xpac: options.includeXpac ? "true" : undefined,
+    });
+  }
+
+  private async requestAllListPages<T>(path: string, options: ListOptions): Promise<ApiEnvelope<T>> {
+    if (options.page !== undefined) {
+      throw new Error("Use cursor pagination for --all requests.");
+    }
+
+    const query = this.createListQuery({ ...options, cursor: options.cursor ?? "*" });
+    return this.requestAllPages<T>(path, query, options.perPage, "results");
+  }
+
+  private async requestAllGroupPages<T>(path: string, query: URLSearchParams, perPage: number | undefined): Promise<ApiEnvelope<T>> {
+    if (!query.has("cursor")) {
+      query.set("cursor", "*");
+    }
+
+    return this.requestAllPages<T>(path, query, perPage, "group_by");
+  }
+
+  private async requestAllPagesFromUrl<T>(url: URL, perPage: number | undefined, mode: "results" | "group_by"): Promise<ApiEnvelope<T>> {
+    return this.requestAllPages<T>(url, undefined, perPage, mode);
+  }
+
+  private async requestAllPages<T>(
+    pathOrUrl: string | URL,
+    initialQuery: URLSearchParams | undefined,
+    perPage: number | undefined,
+    mode: "results" | "group_by",
+  ): Promise<ApiEnvelope<T>> {
+    let cursor = initialQuery?.get("cursor") ?? "*";
+    let requestUrl = "";
+    let rateLimit: RateLimitMeta = {};
+    let meta: ApiMeta | undefined;
+    const results: T[] = [];
+    const groups: Array<Record<string, unknown>> = [];
+
+    while (cursor) {
+      const query = initialQuery ? new URLSearchParams(initialQuery) : new URL(pathOrUrl.toString()).searchParams;
+      query.set("cursor", cursor);
+      if (perPage !== undefined) {
+        query.set("per_page", String(perPage));
+      }
+
+      const envelope = typeof pathOrUrl === "string"
+        ? await this.request<T>(pathOrUrl, query, true)
+        : await this.requestAbsolute<T>(buildAbsoluteUrl(pathOrUrl, query), true);
+
+      requestUrl ||= envelope.requestUrl;
+      rateLimit = envelope.rateLimit;
+      meta ??= envelope.meta;
+
+      if (mode === "results") {
+        results.push(...(envelope.results ?? []));
+      } else {
+        groups.push(...(envelope.group_by ?? []));
+      }
+
+      cursor = envelope.meta?.next_cursor ?? "";
+    }
+
+    return {
+      requestUrl,
+      rateLimit,
+      meta: meta ? { ...meta, per_page: perPage ?? meta.per_page, next_cursor: null } : undefined,
+      results: mode === "results" ? results : undefined,
+      group_by: mode === "group_by" ? groups : undefined,
+    };
   }
 }
 
@@ -356,8 +465,59 @@ function applyListOptionsToSearchParams(searchParams: URLSearchParams, options: 
   }
 }
 
+function shouldRetry(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
+function resolveRetryDelayMs(headers: Headers, attempt: number): number {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.max(0, seconds * 1000);
+    }
+
+    const dateMs = Date.parse(retryAfter);
+    if (!Number.isNaN(dateMs)) {
+      return Math.max(0, dateMs - Date.now());
+    }
+  }
+
+  return RETRY_BASE_DELAY_MS * 2 ** attempt;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildAbsoluteUrl(url: URL, searchParams: URLSearchParams): string {
+  const nextUrl = new URL(url.toString());
+  nextUrl.search = searchParams.toString();
+  return nextUrl.toString();
+}
+
 function appendFilter(existing: string[] | undefined, next: string): string[] {
   return [...(existing ?? []), next];
+}
+
+export function normalizeWorkIdentifier(id: string): string {
+  const trimmed = id.trim();
+  const bareDoiMatch = trimmed.match(/^10\.\d{4,9}\/\S+$/i);
+  if (bareDoiMatch) {
+    return `https://doi.org/${bareDoiMatch[0]}`;
+  }
+
+  const doiUrlMatch = trimmed.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,9}\/\S+)$/i);
+  if (doiUrlMatch) {
+    return `https://doi.org/${doiUrlMatch[1]}`;
+  }
+
+  const doiPrefixedMatch = trimmed.match(/^doi:\s*(10\.\d{4,9}\/\S+)$/i);
+  if (doiPrefixedMatch) {
+    return `https://doi.org/${doiPrefixedMatch[1]}`;
+  }
+
+  return trimmed;
 }
 
 function extractShortOpenAlexId(value: unknown): string | undefined {

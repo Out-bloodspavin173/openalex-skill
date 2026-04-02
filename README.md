@@ -36,6 +36,10 @@ openalex --help
 - works, authors, sources, institutions, topics, publishers, funders, and concepts
 - helper flows for `related`, `cited-by`, and `references`
 - built-in single-work full-text download when OpenAlex exposes a direct file URL
+- bare DOI input accepted everywhere (`10.xxxx/...`, `doi:...`, full URL all work)
+- `--all` for automatic cursor pagination across any list command
+- `--format bibtex` for direct citation export from works
+- automatic retry with backoff on `429` and server errors
 
 ## Quick Start
 
@@ -44,8 +48,11 @@ npm install -g openalex-skill
 openalex --help
 openalex --version
 openalex works search "llm agents" --per-page 5
+openalex works search "llm agents" --all --format jsonl
 openalex works get https://doi.org/10.1038/nature12373
+openalex works get 10.1038/nature12373
 openalex works download https://doi.org/10.1038/nature12373
+openalex works cited-by doi:10.1038/nature12373 --per-page 5
 ```
 
 Optional but recommended for higher quotas:
@@ -67,6 +74,7 @@ Get a work by DOI or OpenAlex ID:
 
 ```bash
 openalex works get https://doi.org/10.1038/nature12373
+openalex works get 10.1038/nature12373
 openalex works get W2741809807
 ```
 
@@ -74,6 +82,7 @@ Download the best available direct full-text file for one work:
 
 ```bash
 openalex works download https://doi.org/10.1038/nature12373
+openalex works download 10.1038/nature12373
 openalex works download W2741809807 --output ./nature12373.pdf
 ```
 
@@ -81,6 +90,7 @@ Trace citations:
 
 ```bash
 openalex works cited-by https://doi.org/10.1038/nature12373 --per-page 5
+openalex works cited-by 10.1038/nature12373 --per-page 5
 openalex works references W2741809807 --per-page 5
 openalex works related W2741809807 --per-page 5
 ```
@@ -113,6 +123,7 @@ Available formats:
 - `json` - full structured payload
 - `jsonl` - one JSON object per line
 - `markdown` - heading plus JSON block
+- `bibtex` - BibTeX entries for work records
 
 In `summary`, entity rows keep the human-readable title on the first line and include reusable identifiers such as OpenAlex IDs on the secondary line when available.
 
@@ -121,6 +132,8 @@ Quick examples:
 ```bash
 openalex works search "crispr" --per-page 3
 openalex --format detail works get W2741809807
+openalex works search "crispr" --all --format jsonl
+openalex works get 10.1038/nature12373 --format bibtex
 ```
 
 ## Field Control
@@ -190,6 +203,25 @@ openalex config path
 openalex config set api-key your_key_here
 openalex config unset api-key
 ```
+
+## Pagination and Reliability
+
+- Use `--all` on list-style commands to auto-follow cursor pagination until OpenAlex stops returning `next_cursor`
+- `--all` uses cursor pagination and cannot be combined with `--page`
+- transient upstream failures such as `429` and `503` are retried automatically with backoff
+
+Examples:
+
+```bash
+openalex works search "llm agents" --all --per-page 200 --format jsonl
+openalex works cited-by 10.1038/nature12373 --all --per-page 100
+```
+
+## Filter Notes
+
+- `works` filters pass straight through to OpenAlex; the CLI does not rename filter fields for you
+- `authors` institution examples use `last_known_institutions.id:I123456`
+- `works` institution-related filters depend on the OpenAlex field path you want to target, so prefer verifying with `--format json` if a filter returns no rows
 
 ## Skills
 

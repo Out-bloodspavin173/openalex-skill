@@ -22,7 +22,7 @@ import {
 import { createDownloadProgressReporter, downloadWorkFile } from "./download.js";
 import { EntitySpec, listEntities } from "./entities.js";
 import { getFieldCatalog } from "./field-catalog.js";
-import { ApiEnvelope, OpenAlexClient } from "./openalex.js";
+import { ApiEnvelope, normalizeWorkIdentifier, OpenAlexClient } from "./openalex.js";
 import { renderEnvelope, resolveOutputFormat } from "./render.js";
 
 export function buildCli(): Command {
@@ -82,6 +82,7 @@ export function buildCli(): Command {
     .command("rate-limit")
     .description("Show current OpenAlex credit status for the configured API key.")
     .action(async function () {
+      ensureEntityFormatSupported(readGlobalOptions(this).format, "rate-limit");
       const payload = await client().getRateLimit();
       writeOutput(readGlobalOptions(this), "Rate limit status", payload);
     });
@@ -134,6 +135,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       .command("fields")
       .description(`List curated field paths for ${spec.name} output projection.`)
       .action(async function () {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         writeFieldCatalog(readGlobalOptions(this), entityHeading(spec, "fields"), getFieldCatalog(spec.name));
       }),
   );
@@ -143,6 +145,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       .command("list")
       .description(`List ${spec.name} with filters, search, paging, and field selection.`)
       .action(async function (options: CommonListOptions) {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         const payload = await getClient().list(spec.name, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, "list"), payload, spec.name);
       }),
@@ -163,6 +166,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       }, [])
       .description(`Get a single ${spec.singular}.`)
       .action(async function (id: string, options: GlobalOptions & { select?: string[] }) {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         const payload = await getClient().get(spec.name, id, options.select);
         writeOutput(readGlobalOptions(this), entityHeading(spec, `get ${id}`), payload, spec.name);
       }),
@@ -175,6 +179,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         .argument("<query>", `Search query for ${spec.name}`)
         .description(`Search ${spec.name}.`)
         .action(async function (query: string, options: CommonListOptions) {
+          ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
           const listOptions = parseListOptions(options);
           const exactLookupId = resolveExactLookupIdentifier(spec.name, query);
           if (exactLookupId) {
@@ -206,6 +211,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         .requiredOption("--by <field>", "group_by field")
         .description(`Group ${spec.name} by a field.`)
         .action(async function (options: CommonListOptions & { by: string }) {
+          ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
           const payload = await getClient().group(spec.name, options.by, parseListOptions(options));
           writeOutput(readGlobalOptions(this), entityHeading(spec, `group by ${options.by}`), payload, spec.name);
         }),
@@ -224,6 +230,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         .argument("<query>", `Autocomplete ${spec.name}`)
         .description(`Autocomplete names for ${spec.name}.`)
           .action(async function (query: string, options: GlobalOptions) {
+            ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
             const payload = await getClient().autocomplete(spec.name, query);
             void options;
             writeOutput(readGlobalOptions(this), entityHeading(spec, `autocomplete: ${query}`), payload, spec.name);
@@ -241,6 +248,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         }, [])
         .description(`Fetch a random ${spec.singular}.`)
         .action(async function (options: GlobalOptions & { select?: string[] }) {
+          ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
           const payload = await getClient().random(spec.name, options.select);
           writeOutput(readGlobalOptions(this), entityHeading(spec, "random"), payload, spec.name);
         }),
@@ -256,6 +264,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
         .option("--overwrite", "overwrite an existing output file", false)
         .description("Download the best available direct full-text file for a work using OpenAlex metadata URLs.")
         .action(async function (id: string, options: GlobalOptions & { output?: string; overwrite?: boolean }) {
+          ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
           const result = await downloadWorkFile(getClient(), id, {
             output: options.output,
             overwrite: options.overwrite,
@@ -287,6 +296,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch related works using the work's related_works field.")
       .action(async function (id: string, options: CommonListOptions) {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         const payload = await getClient().getRelatedWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `related: ${id}`), payload, spec.name);
       });
@@ -302,6 +312,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch works that cite the given work.")
       .action(async function (id: string, options: CommonListOptions) {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         const payload = await getClient().getCitedByWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `cited by: ${id}`), payload, spec.name);
       });
@@ -317,6 +328,7 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
       .argument("<id>", "OpenAlex work id or DOI")
       .description("Fetch works referenced by the given work.")
       .action(async function (id: string, options: CommonListOptions) {
+        ensureEntityFormatSupported(readGlobalOptions(this).format, spec.name);
         const payload = await getClient().getReferencedWorks(id, parseListOptions(options));
         writeOutput(readGlobalOptions(this), entityHeading(spec, `references: ${id}`), payload, spec.name);
       });
@@ -333,6 +345,12 @@ function buildEntityCommand(spec: EntitySpec, getClient: () => OpenAlexClient): 
 
 function writeOutput(options: GlobalOptions, title: string, payload: unknown, entity?: EntitySpec["name"]): void {
   process.stdout.write(renderEnvelope({ format: options.format, title, fields: options.field, entity }, payload));
+}
+
+function ensureEntityFormatSupported(format: GlobalOptions["format"], entity?: EntitySpec["name"] | "rate-limit"): void {
+  if (format === "bibtex" && entity !== "works") {
+    throw new Error("BibTeX output is only supported for works.");
+  }
 }
 
 function readGlobalOptions(command: Command): GlobalOptions {
@@ -379,10 +397,8 @@ function resolveExactLookupIdentifier(entity: EntitySpec["name"], query: string)
   }
 
   if (entity === "works") {
-    const doi = normalizeDoiIdentifier(trimmed);
-    if (doi) {
-      return doi;
-    }
+    const normalized = normalizeWorkIdentifier(trimmed);
+    return normalized !== trimmed || /^https?:\/\/(?:dx\.)?doi\.org\//i.test(trimmed) ? normalized : undefined;
   }
 
   if (entity === "authors") {
@@ -414,25 +430,6 @@ function getEntityIdPrefix(entity: EntitySpec["name"]): string {
     case "concepts":
       return "C";
   }
-}
-
-function normalizeDoiIdentifier(query: string): string | undefined {
-  const bareDoiMatch = query.match(/^10\.\d{4,9}\/\S+$/i);
-  if (bareDoiMatch) {
-    return `https://doi.org/${bareDoiMatch[0]}`;
-  }
-
-  const doiUrlMatch = query.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,9}\/\S+)$/i);
-  if (doiUrlMatch) {
-    return `https://doi.org/${doiUrlMatch[1]}`;
-  }
-
-  const doiPrefixedMatch = query.match(/^doi:\s*(10\.\d{4,9}\/\S+)$/i);
-  if (doiPrefixedMatch) {
-    return `https://doi.org/${doiPrefixedMatch[1]}`;
-  }
-
-  return undefined;
 }
 
 function normalizeOrcidIdentifier(query: string): string | undefined {

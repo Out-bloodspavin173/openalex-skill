@@ -26,6 +26,7 @@ export interface CommonListOptions extends GlobalOptions {
   page?: string;
   perPage?: string;
   cursor?: string;
+  all?: boolean;
   includeXpac?: boolean;
 }
 
@@ -36,7 +37,7 @@ export function createProgram(): Command {
     .name("openalex")
     .description(`Human-friendly and agent-friendly CLI for OpenAlex. Entities: ${entityList}`)
     .version(readPackageVersion(), "-V, --version", "display CLI version")
-    .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|auto", "summary")
+    .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|bibtex|auto", "summary")
     .option("--field <path>", "repeatable output field path for projection, e.g. title or authorships.author.display_name", collectRepeatable, [])
     .showHelpAfterError(true)
     .showSuggestionAfterError();
@@ -65,7 +66,8 @@ export function addConfiguredListOptions(command: Command, config: CommonOptionC
     .option("--seed <seed>", "sample seed")
     .option("--page <n>", "page number")
     .option("--per-page <n>", "results per page")
-    .option("--cursor <cursor>", "cursor pagination token");
+    .option("--cursor <cursor>", "cursor pagination token")
+    .option("--all", "auto-follow cursor pagination until all results are collected", false);
 
   if (config.allowSearch ?? true) {
     command.option("--search <query>", "full text search query");
@@ -87,6 +89,10 @@ export function parseListOptions(options: CommonListOptions): ListOptions {
     throw new Error("Use either --page or --cursor, not both.");
   }
 
+   if (options.page && options.all) {
+    throw new Error("Use either --page or --all, not both.");
+  }
+
   return {
     filter: options.filter,
     search: options.search,
@@ -97,13 +103,14 @@ export function parseListOptions(options: CommonListOptions): ListOptions {
     page: parseOptionalInt(options.page),
     perPage: parseOptionalInt(options.perPage),
     cursor: options.cursor,
+    all: options.all,
     includeXpac: options.includeXpac,
   };
 }
 
 export function addInheritedGlobalOptionHelp(command: Command): Command {
   return command
-    .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|auto", "summary")
+    .option("-f, --format <format>", "output format: summary|detail|json|jsonl|markdown|bibtex|auto", "summary")
     .option(
       "--field <path>",
       "repeatable output field path for projection, e.g. title or authorships.author.display_name",

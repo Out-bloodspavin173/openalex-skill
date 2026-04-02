@@ -111,12 +111,17 @@ describe("OpenAlexClient", () => {
       mailto: undefined,
     });
 
-    await client.getCitedByWorks("https://doi.org/10.1038/nature12373", { perPage: 5 });
-    await client.getReferencedWorks("https://doi.org/10.1038/nature12373", { perPage: 5 });
+    await client.getCitedByWorks("10.1038/nature12373", { perPage: 5 });
+    await client.getReferencedWorks("doi:10.1038/nature12373", { perPage: 5 });
+
+    const citedByLookupUrl = fetchMock.mock.calls[0]?.[0] as URL;
+    const referencesLookupUrl = fetchMock.mock.calls[2]?.[0] as URL;
 
     const citedByUrl = fetchMock.mock.calls[1]?.[0] as URL;
     const referencesUrl = fetchMock.mock.calls[3]?.[0] as URL;
 
+    expect(decodeURIComponent(citedByLookupUrl.pathname)).toBe("/works/https://doi.org/10.1038/nature12373");
+    expect(decodeURIComponent(referencesLookupUrl.pathname)).toBe("/works/https://doi.org/10.1038/nature12373");
     expect(citedByUrl.searchParams.get("filter")).toBe("cites:W2159974629");
     expect(referencesUrl.searchParams.get("filter")).toBe("cited_by:W2159974629");
   });
@@ -148,12 +153,89 @@ describe("OpenAlexClient", () => {
       mailto: undefined,
     });
 
-    await client.getRelatedWorks("https://doi.org/10.1038/nature12373", { perPage: 2, select: ["id"] });
+    await client.getRelatedWorks("10.1038/nature12373", { perPage: 2, select: ["id"] });
 
+    const relatedLookupUrl = fetchMock.mock.calls[0]?.[0] as URL;
     const relatedUrl = fetchMock.mock.calls[1]?.[0] as URL;
+    expect(decodeURIComponent(relatedLookupUrl.pathname)).toBe("/works/https://doi.org/10.1038/nature12373");
     expect(relatedUrl.searchParams.get("filter")).toBe("openalex:W1|W2|W3|W4");
     expect(relatedUrl.searchParams.get("per_page")).toBe("2");
     expect(relatedUrl.searchParams.get("select")).toBe("id");
+  });
+
+  it("retries retryable upstream failures with exponential backoff", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        text: async () => "rate limited",
+        headers: new Headers({ "retry-after": "0" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        text: async () => "unavailable",
+        headers: new Headers({ "retry-after": "0" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({ meta: { count: 1 }, results: [{ id: "https://openalex.org/W1" }] }),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    await client.list("works", { perPage: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("auto-follows cursor pagination when all results are requested", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        json: async () => ({
+          meta: { count: 3, per_page: 2, next_cursor: "cursor-2" },
+          results: [
+            { id: "https://openalex.org/W1" },
+            { id: "https://openalex.org/W2" },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "x-ratelimit-remaining": "998" }),
+        json: async () => ({
+          meta: { count: 3, per_page: 2, next_cursor: null },
+          results: [{ id: "https://openalex.org/W3" }],
+        }),
+      });
+
+    const client = new OpenAlexClient({
+      apiKey: "test-key",
+      baseUrl: "https://api.openalex.org",
+      mailto: undefined,
+    });
+
+    const payload = await client.list("works", { all: true, perPage: 2 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [firstUrl] = fetchMock.mock.calls[0] as [URL];
+    const [secondUrl] = fetchMock.mock.calls[1] as [URL];
+    expect(firstUrl.searchParams.get("cursor")).toBe("*");
+    expect(secondUrl.searchParams.get("cursor")).toBe("cursor-2");
+    expect(payload.results?.map((item) => item.id)).toEqual([
+      "https://openalex.org/W1",
+      "https://openalex.org/W2",
+      "https://openalex.org/W3",
+    ]);
+    expect(payload.meta?.next_cursor).toBeNull();
   });
 
   it("adds a helpful hint when a work lookup returns 404", async () => {
@@ -642,6 +724,12 @@ describe("command helpers", () => {
       /Use either --page or --cursor, not both/,
     );
   });
+
+  it("rejects page and all being used together", () => {
+    expect(() => parseListOptions({ format: "summary", page: "2", all: true })).toThrow(
+      /Use either --page or --all, not both/,
+    );
+  });
 });
 
 describe("CLI integration", () => {
@@ -755,6 +843,33 @@ describe("CLI integration", () => {
     expect(firstCall).toContain("Fallback Search Result");
   });
 
+  it("normalizes bare DOI input for direct work lookups", async () => {
+    process.env.OPENALEX_API_KEY = "test-key";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: async () => ({
+        id: "https://openalex.org/W2741809807",
+        display_name: "Nature DOI Lookup",
+      }),
+    });
+
+    const cli = buildCli();
+    await cli.parseAsync(["works", "get", "10.1038/nature12373"], { from: "user" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0] as [URL];
+    expect(decodeURIComponent(url.pathname)).toBe("/works/https://doi.org/10.1038/nature12373");
+    expect(String(stdoutSpy.mock.calls[0]?.[0])).toContain("Nature DOI Lookup");
+  });
+
+  it("rejects bibtex output for non-work entities", async () => {
+    const cli = buildCli();
+    await expect(cli.parseAsync(["authors", "get", "A1", "--format", "bibtex"], { from: "user" })).rejects.toThrow(
+      /BibTeX output is only supported for works/,
+    );
+  });
+
   it("lists curated field paths without making an API request", async () => {
     const cli = buildCli();
     await cli.parseAsync(["works", "fields"], { from: "user" });
@@ -858,6 +973,7 @@ describe("CLI integration", () => {
 
     expect(helpText).toContain("-f, --format <format>");
     expect(helpText).toContain("--field <path>");
+    expect(helpText).toContain("--all");
   });
 
   it("does not expose a redundant --search option on search subcommands", () => {
@@ -896,7 +1012,7 @@ describe("CLI integration", () => {
     await cli.parseAsync(["works", "download", "W999", "--output", outputPath], { from: "user" });
 
     const firstCall = String(stdoutSpy.mock.calls[0]?.[0]);
-    const stderrOutput = stderrSpy.mock.calls.map((call) => String(call[0])).join("");
+    const stderrOutput = stderrSpy.mock.calls.map((call: [unknown, ...unknown[]]) => String(call[0])).join("");
     expect(firstCall).toContain("Downloaded work full text: W999");
     expect(firstCall).toContain(`saved: ${outputPath}`);
     expect(firstCall).toContain("source: primary_location.pdf_url");
@@ -986,6 +1102,59 @@ describe("CLI integration", () => {
     expect(output).toContain("Multi-Agent Systems and Negotiation");
     expect(output).toContain("authors: Andrew Zhao, Daniel Huang, Quentin Xu + 1 more");
     expect(output).toContain("doi: https://doi.org/10.1609/aaai.v38i17.29936");
+  });
+
+  it("renders BibTeX output for work payloads", () => {
+    const output = renderEnvelope(
+      { format: "bibtex", title: "Works get W1", entity: "works" },
+      {
+        data: {
+          id: "https://openalex.org/W1234567890",
+          title: "Attention Is All You Need",
+          type: "article",
+          publication_year: 2017,
+          ids: { doi: "https://doi.org/10.48550/arXiv.1706.03762" },
+          primary_location: { source: { display_name: "NeurIPS" } },
+          authorships: [
+            { author: { display_name: "Ashish Vaswani" } },
+            { author: { display_name: "Noam Shazeer" } },
+          ],
+        },
+      },
+    );
+
+    expect(output).toContain("@article{");
+    expect(output).toContain("title = {Attention Is All You Need},");
+    expect(output).toContain("author = {Ashish Vaswani and Noam Shazeer},");
+    expect(output).toContain("doi = {10.48550/arxiv.1706.03762},");
+    expect(output).toContain("journal = {NeurIPS},");
+  });
+
+  it("adds publication year to BibTeX citation keys to reduce collisions", () => {
+    const output = renderEnvelope(
+      { format: "bibtex", title: "Works search: duplicates", entity: "works" },
+      {
+        results: [
+          {
+            id: "https://openalex.org/W1",
+            title: "Paper One",
+            type: "article",
+            publication_year: 2024,
+            authorships: [{ author: { display_name: "Ashish Vaswani" } }],
+          },
+          {
+            id: "https://openalex.org/W2",
+            title: "Paper Two",
+            type: "article",
+            publication_year: 2025,
+            authorships: [{ author: { display_name: "Ashish Vaswani" } }],
+          },
+        ],
+      },
+    );
+
+    expect(output).toContain("@article{AshishVaswani2024,");
+    expect(output).toContain("@article{AshishVaswani2025,");
   });
 
   it("renders author summaries with h-index, institution, and orcid", () => {

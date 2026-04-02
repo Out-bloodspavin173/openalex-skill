@@ -2,7 +2,7 @@ import pc from "picocolors";
 
 import type { EntityName } from "./entities.js";
 
-export type OutputFormat = "auto" | "summary" | "detail" | "json" | "jsonl" | "markdown";
+export type OutputFormat = "auto" | "summary" | "detail" | "json" | "jsonl" | "markdown" | "bibtex";
 
 export interface RenderContext {
   format: OutputFormat;
@@ -34,6 +34,8 @@ export function renderEnvelope(ctx: RenderContext, payload: unknown): string {
       return renderJsonl(safePayload);
     case "markdown":
       return renderMarkdown(ctx.title, safePayload);
+    case "bibtex":
+      return renderBibtex(safePayload);
     case "summary":
     default:
       return renderSummary(ctx.title, safePayload, ctx.entity);
@@ -64,6 +66,16 @@ function renderJsonl(payload: unknown): string {
 function renderMarkdown(title: string, payload: unknown): string {
   const lines = [`# ${title}`, "", "```json", JSON.stringify(payload, null, 2), "```", ""];
   return lines.join("\n");
+}
+
+function renderBibtex(payload: unknown): string {
+  const businessPayload = isRecord(payload) ? getBusinessPayload(payload) : payload;
+  const items = Array.isArray(businessPayload) ? businessPayload : [businessPayload];
+  const entries = items
+    .map((item, index) => renderBibtexEntry(item, index))
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+
+  return entries.length > 0 ? `${entries.join("\n\n")}\n` : "% No BibTeX entries available.\n";
 }
 
 function renderDetail(title: string, payload: unknown): string {
@@ -183,6 +195,21 @@ function summarizeItem(item: Record<string, unknown>, index: number): string {
   }
 
   return `- ${title} ${pc.dim(`(${secondary.join(" | ")})`)}`;
+}
+
+function renderBibtexEntry(value: unknown, index: number): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const entryType = inferBibtexType(value);
+  const citationKey = buildBibtexKey(value, index);
+  const fields = buildBibtexFields(value);
+  if (fields.length === 0) {
+    return undefined;
+  }
+
+  return [`@${entryType}{${citationKey},`, ...fields.map((field) => `  ${field}`), `}`].join("\n");
 }
 
 function summarizeItemLines(
@@ -543,6 +570,97 @@ function stringifyValue(value: unknown): string {
   }
 
   return JSON.stringify(value);
+}
+
+function inferBibtexType(item: Record<string, unknown>): string {
+  const workType = typeof item.type === "string" ? item.type.toLowerCase() : "";
+  if (["article", "journal-article", "peer-review", "editorial"].includes(workType)) {
+    return "article";
+  }
+
+  if (["proceedings-article", "book-chapter", "dataset", "report"].includes(workType)) {
+    return "inproceedings";
+  }
+
+  return "misc";
+}
+
+function buildBibtexKey(item: Record<string, unknown>, index: number): string {
+  const firstAuthor = Array.isArray(item.authorships)
+    ? cleanBibtexToken(readNestedString(item.authorships[0], ["author", "display_name"]))
+    : undefined;
+  const year = typeof item.publication_year === "number" ? String(item.publication_year) : undefined;
+  const titleToken = cleanBibtexToken(typeof item.title === "string" ? item.title : typeof item.display_name === "string" ? item.display_name : undefined);
+  const shortId = typeof item.id === "string" ? item.id.replace(/^https?:\/\/openalex\.org\//i, "") : undefined;
+  const baseKey = firstAuthor ?? titleToken ?? shortId ?? `openalex${index + 1}`;
+  return `${baseKey}${year ?? ""}`;
+}
+
+function buildBibtexFields(item: Record<string, unknown>): string[] {
+  const fields: Array<[string, string | undefined]> = [
+    ["title", wrapBibtexValue(typeof item.title === "string" ? item.title : typeof item.display_name === "string" ? item.display_name : undefined)],
+    ["author", wrapBibtexValue(renderBibtexAuthors(item.authorships))],
+    ["year", typeof item.publication_year === "number" ? String(item.publication_year) : undefined],
+    ["doi", wrapBibtexValue(normalizeDoiForComparison(readPreferredWorkDoi(item)))],
+    ["url", wrapBibtexValue(typeof item.id === "string" ? item.id : undefined)],
+    ["journal", wrapBibtexValue(readNestedString(item, ["primary_location", "source", "display_name"]))],
+    ["booktitle", wrapBibtexValue(readNestedString(item, ["primary_location", "source", "display_name"]))],
+    ["publisher", wrapBibtexValue(readNestedString(item, ["primary_location", "source", "host_organization_name"]))],
+  ];
+
+  const entryType = inferBibtexType(item);
+  return fields
+    .filter(([key, value]) => {
+      if (!value) {
+        return false;
+      }
+      if (key === "booktitle") {
+        return entryType === "inproceedings";
+      }
+      if (key === "journal") {
+        return entryType === "article";
+      }
+      return true;
+    })
+    .map(([key, value]) => `${key} = ${value},`);
+}
+
+function renderBibtexAuthors(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+
+  const authors = value
+    .map((item) => readNestedString(item, ["author", "display_name"]))
+    .filter((item): item is string => Boolean(item))
+    .map((item) => item.replace(/\s+/g, " ").trim());
+
+  return authors.length > 0 ? authors.join(" and ") : undefined;
+}
+
+function cleanBibtexToken(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const compact = value.replace(/[^A-Za-z0-9]+/g, "");
+  return compact.length > 0 ? compact : undefined;
+}
+
+function wrapBibtexValue(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return `{${escapeBibtexValue(value)}}`;
+}
+
+function escapeBibtexValue(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/[{}]/g, (matched) => `\\${matched}`)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function renderDetailedValue(value: unknown, depth: number, key?: string): string[] {

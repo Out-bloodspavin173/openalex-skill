@@ -42,6 +42,13 @@ One JSON object per line. Good for streaming or line-by-line processing.
 ### `markdown`
 Heading + JSON block. Useful for documentation or reports.
 
+### `bibtex`
+BibTeX entries for work records.
+
+- best for citation-manager import or quick `.bib` export
+- uses OpenAlex work metadata directly, so no extra DOI lookup is required
+- works especially well with direct DOI lookups and `--field` is usually unnecessary here
+
 ## Field Projection with `--field`
 
 **Client-side projection** - fetch full payload first, then display only requested fields:
@@ -63,6 +70,9 @@ openalex works search "crispr" --per-page 3 \
   --field title \
   --field abstract \
   --field cited_by_count
+
+# export one work as BibTeX
+openalex works get 10.1038/nature12373 --format bibtex
 ```
 
 **Key behaviors:**
@@ -139,6 +149,9 @@ openalex works search "crispr" --per-page 3 \
 # Most efficient: ~2KB for 5 results
 openalex works search "LLM agents" --per-page 5
 
+# Fetch all pages with cursor pagination
+openalex works search "LLM agents" --all --per-page 200 --format jsonl
+
 # Structured but readable with inline lists: ~10KB for 5 results
 openalex works search "LLM agents" --per-page 5 --format detail
 
@@ -153,6 +166,9 @@ openalex works search "LLM agents" --per-page 5 \
 
 # Full payload: ~268KB for 5 results
 openalex works search "LLM agents" --per-page 5 --format json
+
+# Citation export
+openalex works get 10.1038/nature12373 --format bibtex
 ```
 
 ## `--select` caveats
